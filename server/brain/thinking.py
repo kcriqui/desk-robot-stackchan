@@ -35,6 +35,17 @@ _SENTENCE_END = re.compile(r"(?<=[!?])\s+|(?<=[^.]\.)\s+")
 # An action returns (text for the model, optional fresh camera JPEG).
 Action = Callable[[dict], tuple[str, bytes | None]]
 
+# The neck tilts one way from level: down on the original build, up on a
+# StackChan (config.BODY).
+_NOD = config.NOD
+_NO_NOD = "up" if _NOD == "down" else "down"
+_NECK_LIMIT = (
+    f"{_NO_NOD.capitalize()} is as {'high' if _NO_NOD == 'up' else 'low'} as 'level': "
+    f"your neck cannot tilt {'above' if _NO_NOD == 'up' else 'below'} eye level."
+)
+_NOD_MAX = int(max(abs(config.TRACK_TILT_MIN), abs(config.TRACK_TILT_MAX)))
+_PAN_MAX = int(config.TRACK_PAN_LIMIT)
+
 TOOLS = [
     {
         "type": "function",
@@ -46,23 +57,25 @@ TOOLS = [
                 "the current picture. Always call it when asked, even if you think "
                 "you are already there: the result tells you where your head really "
                 "is and whether it is at a limit. You get a fresh camera image "
-                "afterwards; describe only what that image shows. Up is as high as "
-                "'level': your neck cannot tilt above eye level."
+                f"afterwards; describe only what that image shows. {_NECK_LIMIT}"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "direction": {
                         "type": "string",
-                        "enum": ["left", "right", "down", "level", "center"],
+                        "enum": ["left", "right", _NOD, "level", "center"],
                         "description": (
-                            "left/right turn the head only (no nod); down/level nod only (no turn); "
+                            f"left/right turn the head only (no nod); {_NOD}/level nod only (no turn); "
                             "center = straight ahead and level"
                         ),
                     },
                     "degrees": {
                         "type": "number",
-                        "description": "How far: 5-60 for left/right, 5-60 for down. Omit for a normal look.",
+                        "description": (
+                            f"How far: 5-{_PAN_MAX} for left/right, 5-{_NOD_MAX} for {_NOD}. "
+                            "Omit for a normal look."
+                        ),
                     },
                 },
                 "required": ["direction"],

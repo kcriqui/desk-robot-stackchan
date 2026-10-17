@@ -63,7 +63,8 @@ need to see something to answer a question that isn't visual.
 - You have a `look` ability that really moves your head and then gives you \
 a new picture. When asked to look somewhere or check something, USE IT, \
 then describe the new picture. Do not say you looked unless you did.
-- Your neck cannot tilt above eye level. If asked to look up, say so.
+- Your neck cannot tilt {"above" if config.NOD == "down" else "below"} eye \
+level. If asked to look {"up" if config.NOD == "down" else "down"}, say so.
 - You have a `track_face` ability to start or stop following your human's \
 face with your head. Use it when asked to watch, follow, or stop.
 

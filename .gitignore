@@ -1,6 +1,8 @@
 # PlatformIO
 firmware/.pio/
 firmware/.vscode/
+firmware-stackchan/.pio/
+firmware-stackchan/.vscode/
 
 # Python
 __pycache__/
@@ -10,6 +12,7 @@ server/.venv/
 
 # Secrets — never commit WiFi or API credentials
 firmware/include/secrets.h
+firmware-stackchan/include/secrets.h
 .env
 .env.*
 !.env.example

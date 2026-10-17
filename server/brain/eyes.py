@@ -168,6 +168,10 @@ class Eyes:
                         "temperature_c": eyes.temperature,
                         "last_heard": eyes.last_heard,
                         "last_said": eyes.last_said,
+                        # the head's range for this BODY, for the console's sliders
+                        "head_limits": {"pan": config.TRACK_PAN_LIMIT,
+                                        "tilt_min": config.TRACK_TILT_MIN,
+                                        "tilt_max": config.TRACK_TILT_MAX},
                         **eyes.tracking_info,
                     }
                     if eyes.state_provider is not None:

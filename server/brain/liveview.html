@@ -352,6 +352,10 @@
       $("viewport").classList.toggle("dark", !fresh);
       $("viewport").classList.toggle("speaking", !!s.speaking);
       $("framenote").textContent = fresh ? "" : "no fresh frame";
+      if (s.head_limits) {  // the sliders follow the body's range (BODY in server/.env)
+        $("pan").min = -s.head_limits.pan; $("pan").max = s.head_limits.pan;
+        $("tilt").min = s.head_limits.tilt_min; $("tilt").max = s.head_limits.tilt_max;
+      }
       const pan = s.pan ?? 0, tilt = s.tilt ?? 0;
       $("horizon").style.top = (50 + tilt * (25 / 60)) + "%";
       $("meridian").style.left = (50 - pan * (38 / 60)) + "%";

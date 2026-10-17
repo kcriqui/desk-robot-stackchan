@@ -24,6 +24,16 @@ ROBOT_NAME = "Rocky"
 # stays out of the repo; "friend" until you do.
 HUMAN_NAME = os.environ.get("HUMAN_NAME", "friend")
 
+# Which body the brain is driving. Set BODY in server/.env:
+#   desk-robot  the original build in firmware/ (XIAO ESP32S3 on a pan-tilt
+#               kit), whose neck nods DOWN from eye level
+#   stackchan   an M5Stack StackChan running firmware-stackchan/, whose neck
+#               looks UP from eye level
+# The head limits under "Face tracking" follow it.
+BODY = os.environ.get("BODY", "desk-robot").strip().lower()
+if BODY not in ("desk-robot", "stackchan"):
+    raise SystemExit(f"BODY={BODY!r} in server/.env: use desk-robot or stackchan")
+
 # Language model. The brain speaks the OpenAI-style chat API, which
 # OpenRouter, Anthropic and OpenAI all serve, so pick a provider here and
 # put its key in server/.env as LLM_API_KEY. OpenRouter is the default
@@ -196,6 +206,17 @@ TRACK_TILT_SIGN = 1        # flip to -1 if it nods the wrong way
 TRACK_PAN_LIMIT = 60.0     # must match PAN_MIN/MAX_DEG in firmware config.h
 TRACK_TILT_MIN = -60.0     # must match TILT_MIN/MAX_DEG in firmware config.h
 TRACK_TILT_MAX = 0.0
+TILT_WAKE = 0.0            # where his head comes up to when woken
+NOD = "down"               # which way the neck tilts from level (0): "down" or "up"
+if BODY == "stackchan":
+    # Must match firmware-stackchan/include/config.h.
+    TRACK_HFOV = 60.0      # CoreS3 GC0308; approximate, lower it if tracking overshoots
+    TRACK_VFOV = 45.0
+    TRACK_PAN_LIMIT = 90.0
+    TRACK_TILT_MIN = 0.0   # level is as low as it goes
+    TRACK_TILT_MAX = 60.0
+    TILT_WAKE = 15.0       # it sits low on the desk: perk up toward a face
+    NOD = "up"
 TRACK_LOST_SECONDS = 4.0   # no face this long → idle glances resume
 
 # How many conversation turns to remember before forgetting the oldest.

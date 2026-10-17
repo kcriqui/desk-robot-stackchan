@@ -238,8 +238,8 @@ async def handle_console_line(line: str) -> bool:
 
 async def look(args: dict) -> tuple[str, bytes | None]:
     """Move the head, wait for it to get there, and grab a fresh frame.
-    Only the axis that was asked for moves: "left"/"right" pan, "down"/
-    "level" tilt, "center" both."""
+    Only the axis that was asked for moves: "left"/"right" pan, "down"/"up"/
+    "level" tilt (whichever this body's neck can do), "center" both."""
     pan = tracker.pan if tracker else 0.0
     tilt = tracker.tilt if tracker else 0.0
     move_pan = move_tilt = False
@@ -253,12 +253,14 @@ async def look(args: dict) -> tuple[str, bytes | None]:
         pan, move_pan = (-deg if d == "left" else deg), True
     elif d == "down":
         tilt, move_tilt = -(amount if amount is not None else 30.0), True  # a normal glance down; ask for degrees to go further
+    elif d == "up":
+        tilt, move_tilt = (amount if amount is not None else 30.0), True
     elif d == "level":
-        tilt, move_tilt = config.TRACK_TILT_MAX, True
+        tilt, move_tilt = 0.0, True
     elif d == "center":
-        pan, tilt, move_pan, move_tilt = 0.0, config.TRACK_TILT_MAX, True, True
+        pan, tilt, move_pan, move_tilt = 0.0, 0.0, True, True
     if not (move_pan or move_tilt):
-        return ("Say where to look: left, right, down, level, or center.", None)
+        return (f"Say where to look: left, right, {config.NOD}, level, or center.", None)
     pan = max(-config.TRACK_PAN_LIMIT, min(config.TRACK_PAN_LIMIT, pan))
     tilt = max(config.TRACK_TILT_MIN, min(config.TRACK_TILT_MAX, tilt))
 
@@ -279,12 +281,14 @@ async def look(args: dict) -> tuple[str, bytes | None]:
         await asyncio.sleep(0.1)
     jpeg = eyes.latest()
     pan_word = "left" if pan < -5 else "right" if pan > 5 else "center"
+    # Level (0) is one end of the travel: the top for a neck that nods down,
+    # the bottom for one that looks up.
     if tilt <= config.TRACK_TILT_MIN + 0.5:
-        tilt_word = "down, as far as it goes"
+        tilt_word = "level, as low as it goes" if tilt > -5 else "down, as far as it goes"
     elif tilt >= config.TRACK_TILT_MAX - 0.5:
-        tilt_word = "level, as high as it goes"
+        tilt_word = "level, as high as it goes" if tilt < 5 else "up, as far as it goes"
     else:
-        tilt_word = "down" if tilt < -5 else "level"
+        tilt_word = "down" if tilt < -5 else "up" if tilt > 5 else "level"
     where = f"Head is now at pan {pan:.0f} deg ({pan_word}), tilt {tilt:.0f} deg ({tilt_word})."
     return (where + (" Fresh camera image attached." if jpeg else " No camera image available."), jpeg)
 
@@ -863,14 +867,15 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
         awake_until = 0.0  # say() doesn't touch it, but be explicit
         return
     if woke:
-        # Heard his name: eyes open, perk up to eye level (tilt can't go
-        # above 0 on this build — the platform would hit the pan servo).
+        # Heard his name: eyes open, perk up to TILT_WAKE (eye level on the
+        # original build, where tilt can't go above 0 — the platform would
+        # hit the pan servo; a little up on a StackChan).
         await send_to_robot({"type": "asleep", "on": False})
         await send_to_robot({"type": "emotion", "name": "surprised"})
         if tracker is None or not tracker.tracking:
-            await send_to_robot({"type": "tilt", "deg": 0})
+            await send_to_robot({"type": "tilt", "deg": config.TILT_WAKE})
             if tracker is not None:
-                tracker.note_pose(tilt=0)
+                tracker.note_pose(tilt=config.TILT_WAKE)
     if woke and not question:
         # Just "hey Rocky" — wait for the actual question.
         await say(lines["wake"])

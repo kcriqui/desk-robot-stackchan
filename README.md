@@ -8,6 +8,11 @@ and speaks the reply through the robot's speaker.
 
 <!-- photo or short clip goes here: docs/rocky.jpg -->
 
+> **Have an M5Stack StackChan?** This fork adds firmware for it in
+> [`firmware-stackchan/`](firmware-stackchan/). It needs no parts and no
+> wiring, and the brain is the same. See [docs/stackchan.md](docs/stackchan.md).
+> The original project is [cgro00/desk-robot](https://github.com/cgro00/desk-robot).
+
 ## Versions
 
 **V1 is the robot in the videos.** It is frozen as the
