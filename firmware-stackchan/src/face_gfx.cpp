@@ -41,8 +41,24 @@ void FaceGfx::drawTriangle(int x0, int y0, int x1, int y1, int x2, int y2) {
 }
 
 void FaceGfx::drawLine(int x0, int y0, int x1, int y1) {
-  // A one-face-pixel line is SCALE screen pixels wide.
-  canvas_.drawWideLine(mid(x0), mid(y0), mid(x1), mid(y1), SCALE / 2, color_);
+  // A one-face-pixel line is SCALE screen pixels wide: a filled quad (two
+  // triangles). Not drawWideLine: that one anti-aliases by reading pixels
+  // back, which crashes on a 1-bit palette canvas.
+  float ax = mid(x0), ay = mid(y0), bx = mid(x1), by = mid(y1);
+  float dx = bx - ax, dy = by - ay;
+  float len = sqrtf(dx * dx + dy * dy);
+  float hw = SCALE / 2;
+  if (len < 0.01f) {
+    canvas_.fillCircle(lroundf(ax), lroundf(ay), lroundf(hw), color_);
+    return;
+  }
+  float nx = -dy / len * hw, ny = dx / len * hw;  // half-width, across the line
+  int p0x = lroundf(ax + nx), p0y = lroundf(ay + ny);
+  int p1x = lroundf(ax - nx), p1y = lroundf(ay - ny);
+  int p2x = lroundf(bx - nx), p2y = lroundf(by - ny);
+  int p3x = lroundf(bx + nx), p3y = lroundf(by + ny);
+  canvas_.fillTriangle(p0x, p0y, p1x, p1y, p2x, p2y, color_);
+  canvas_.fillTriangle(p0x, p0y, p2x, p2y, p3x, p3y, color_);
 }
 
 void FaceGfx::drawStr(int x, int y, const char* s) {
