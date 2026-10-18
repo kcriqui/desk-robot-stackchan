@@ -20,8 +20,8 @@ constexpr float TILT_MIN_DEG = 0.0f;   // level: the pitch servo's lower stop
 constexpr float TILT_MAX_DEG = 60.0f;  // 90 is straight at the ceiling
 
 // Flip if `pan -30` turns the head to ITS right instead of its left, or if
-// `tilt 20` looks down. (Yaw is CCW-positive in the BSP, hence the default.)
-constexpr bool PAN_INVERT = true;
+// `tilt 20` looks down. Both defaults checked on a StackChan (2026-10-17).
+constexpr bool PAN_INVERT = false;
 constexpr bool TILT_INVERT = false;
 
 // Motion speed, 0-1000 (the BSP's spring speed). 500 is its default; higher

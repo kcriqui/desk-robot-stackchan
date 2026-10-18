@@ -104,16 +104,23 @@ same folder. Fill in your WiFi, the computer's address, and the same
   small, so the tips in the main README's "Change the voice" section apply
   here too.
 
-## Not yet confirmed on hardware
+## Checked on hardware
 
-This port was written against M5Stack's StackChan BSP and M5Unified
-sources, and builds cleanly. These points still need a real robot to
-settle. If you're first, say how it went.
+On one StackChan, over USB (2026-10-17), these all work as expected:
 
-- Which way the yaw and pitch servos turn (`PAN_INVERT`, `TILT_INVERT`), and
-  whether pitch 0 is level on every unit.
-- That the head-touch sensor and LEDs keep working after the camera takes
-  over the internal I2C bus. M5Stack's own camera code does the same thing.
+- the face, including every expression
+- `pan`, `tilt` and `center` with the default direction flags
+- `beep`, `miclevel` and `snap`
+- `battery`
+- the head-touch blink, which shows the internal I2C bus still works after
+  the camera takes it over
+
+## Not yet confirmed
+
+These points still need trying. If you're first, say how it went.
+
+- Whether pitch 0 is level on every unit, not just one.
+- Talking to the brain over WiFi: wake word, replies, `look`, face tracking.
 - The GC0308's field of view, and how many fps software JPEG really reaches
   while WiFi and audio are busy.
 
