@@ -144,9 +144,12 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         await websocket.close(1008)
         return
     if robot_socket is not None:
-        print(f"(refused a second robot from {peer}: one is already connected)")
-        await websocket.close(1013)
-        return
+        # It knows the token, so it's our robot back after a reboot (reset,
+        # power, an update over WiFi); the old connection just hasn't been
+        # noticed as dead yet. Refusing would keep him away until it times out.
+        old, robot_socket = robot_socket, None
+        print(f"(robot reconnected from {peer}: dropping the old connection)")
+        await old.close(1001)
     robot_socket = websocket
     print(f"robot connected! (fw {hello.get('fw', '?')}, {peer})")
     pick_mic_source()
