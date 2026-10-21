@@ -87,6 +87,36 @@ same folder. Fill in your WiFi, the computer's address, and the same
 `ROBOT_TOKEN`. Then flash again. The serial console shows
 `wifi: connected` and then `brain: connected`.
 
+Optional, in `server/.env`:
+
+- `MIC_SOURCE=robot` listens only through the robot. The computer's mic is
+  never opened, and nothing listens until the robot connects.
+- `ROBOT_NAME=RockyChan` and `ROBOT_ALIASES=Rocky` give him a new wake word
+  ("hey RockyChan", also heard as "Rocky Chan") and keep the old one. He
+  stays Rocky in character, and knows what you call him.
+
+## 3. Updating over WiFi
+
+Once the robot runs firmware with an OTA password, later updates don't need
+the USB cable.
+
+1. In `firmware-stackchan/include/secrets.h`, set `OTA_PASSWORD` to a long
+   random string, and optionally `OTA_HOSTNAME` (default `stackchan`).
+   Flash over USB once. The console prints `ota: ready as <name>.local`.
+2. Copy `firmware-stackchan/ota.ini.example` to `ota.ini` (git-ignored). Put
+   the same password in `--auth=`, and `<name>.local` (or the robot's IP
+   address) in `upload_port`.
+3. From then on:
+
+   ```bash
+   pio run -e stackchan-ota -t upload
+   ```
+
+The robot restarts into the new firmware, and the brain takes it straight
+back. If an update is interrupted, the robot keeps running the old firmware
+(the 16 MB partition table has two app slots). Without `OTA_PASSWORD` the
+firmware never listens for updates.
+
 ## Tuning
 
 - **How face tracking works here.** Each camera frame carries the head's
@@ -139,11 +169,16 @@ These points still need trying. If you're first, say how it went.
 
 ## Known issues
 
-- **After `pio run -t upload`, press reset.** The upload ends with "Hard
-  resetting via RTS pin", but the CoreS3 often stays in download mode until
-  the reset button is pressed. To look into: esptool's
-  `--after watchdog-reset` (via `upload_flags` in platformio.ini) is meant
-  for the ESP32-S3's built-in USB and may fix it.
+- **Needing reset after an upload: very likely fixed.** Early firmware often
+  seemed to stay dark after `pio run -t upload` until reset was pressed. The
+  culprit was most likely the USB-serial stall (now fixed): with USB plugged
+  in and no monitor open, every console print blocked for up to 100 ms, so
+  boot dragged and the brain refused the late hello. Since the fix, 9 of 9
+  uploads (4 through PlatformIO, 5 through esptool directly) came back by
+  themselves, checked over WiFi without touching the serial port. esptool's
+  `--after watchdog-reset` is no better here: it reboots fine (4/5) but
+  reports every upload as failed, because the port vanishes mid-reset.
+  If a board still stays dark, press reset once.
 
 ## Keeping up with the original
 

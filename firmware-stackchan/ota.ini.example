@@ -1,0 +1,13 @@
+; Copy to ota.ini (same folder, git-ignored) to flash over WiFi:
+;   pio run -e stackchan-ota -t upload
+; The robot must already run firmware built with OTA_PASSWORD in secrets.h
+; (flash it over USB once), and be on the same network as this computer.
+[env:stackchan-ota]
+extends = env:stackchan
+upload_protocol = espota
+; OTA_HOSTNAME from secrets.h plus ".local", or the robot's IP address if
+; .local names don't resolve on this computer.
+upload_port = stackchan.local
+; The same password as OTA_PASSWORD in secrets.h.
+upload_flags =
+    --auth=change-me-too

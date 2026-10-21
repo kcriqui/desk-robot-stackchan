@@ -24,6 +24,17 @@
 #define HAVE_BRAIN 0
 #endif
 
+// Updates over WiFi only when secrets.h sets a password.
+#if HAVE_BRAIN && defined(OTA_PASSWORD)
+#include <ArduinoOTA.h>
+#define HAVE_OTA 1
+#ifndef OTA_HOSTNAME
+#define OTA_HOSTNAME "stackchan"
+#endif
+#else
+#define HAVE_OTA 0
+#endif
+
 FaceGfx gfx;
 Face face(gfx);
 ServoNeck panNeck;
@@ -231,6 +242,34 @@ void handleCommand(String line) {
   }
 }
 
+#if HAVE_OTA
+// Listen for firmware updates over WiFi (`pio run -e stackchan-ota -t upload`)
+// once WiFi is up. An update blocks loop() until it finishes, then the robot
+// restarts into the new firmware; a failed or interrupted one keeps the old.
+void updateOta() {
+  static bool started = false;
+  if (!started) {
+    if (WiFi.status() != WL_CONNECTED) return;
+    ArduinoOTA.setHostname(OTA_HOSTNAME);
+    ArduinoOTA.setPassword(OTA_PASSWORD);
+    ArduinoOTA.onStart([]() {
+      // Give the update the WiFi and the CPU: stop streaming camera and mic.
+      camera.setStreaming(false, CAMERA_MAX_FPS);
+      mic.setStreaming(false);
+      face.setEmotion(Emotion::Thinking);
+      face.update(millis());
+      Serial.println(F("ota: receiving update..."));
+    });
+    ArduinoOTA.onEnd([]() { Serial.println(F("ota: done, restarting")); });
+    ArduinoOTA.onError([](ota_error_t e) { Serial.printf("ota: failed (error %u)\n", e); });
+    ArduinoOTA.begin();
+    started = true;
+    Serial.printf("ota: ready as %s.local (%s)\n", OTA_HOSTNAME, WiFi.localIP().toString().c_str());
+  }
+  ArduinoOTA.handle();
+}
+#endif
+
 void setup() {
   Serial.begin(115200);
   // Drop console output rather than wait when USB is plugged into a computer
@@ -320,6 +359,9 @@ void loop() {
 #if HAVE_BRAIN
   brainLink.update(now);
   diag.link = max(diag.link, micros() - t0);
+#if HAVE_OTA
+  updateOta();
+#endif
   if (speakDonePending) {
     speakDonePending = false;
     brainLink.sendJson("{\"type\":\"speak_done\"}");

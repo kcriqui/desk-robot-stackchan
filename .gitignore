@@ -13,6 +13,7 @@ server/.venv/
 # Secrets — never commit WiFi or API credentials
 firmware/include/secrets.h
 firmware-stackchan/include/secrets.h
+firmware-stackchan/ota.ini
 .env
 .env.*
 !.env.example
