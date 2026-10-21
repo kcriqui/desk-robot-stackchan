@@ -112,13 +112,23 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     # Anyone on the WiFi can reach this port, so the first message must be a
     # hello carrying the shared token from server/.env. Anything else is
     # dropped without a reply.
+    why = ""  # why the first message isn't a usable hello (never shows the token)
     try:
         first = await asyncio.wait_for(websocket.recv(), timeout=2)
-        hello = json.loads(first) if isinstance(first, str) else {}
-    except (asyncio.TimeoutError, json.JSONDecodeError, websockets.ConnectionClosed):
-        hello = {}
+        if isinstance(first, str):
+            hello = json.loads(first)
+        else:
+            hello = {}
+            why = f"first message was binary ({len(first)} bytes, type 0x{first[:1].hex() or '--'})"
+    except asyncio.TimeoutError:
+        hello, why = {}, "no hello within 2 s"
+    except json.JSONDecodeError:
+        hello, why = {}, "first message wasn't JSON"
+    except websockets.ConnectionClosed:
+        hello, why = {}, "closed before saying hello"
     if not isinstance(hello, dict):
         hello = {}  # "[1]", "42", "null" are valid JSON but not a hello
+        why = why or "first message wasn't a JSON object"
     expected = os.environ.get("ROBOT_TOKEN", "")
     if not expected:
         print("(refusing robot: set ROBOT_TOKEN in server/.env and firmware/include/secrets.h)")
@@ -126,7 +136,10 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         return
     offered = str(hello.get("token", "")).encode()  # bytes: compare_digest rejects non-ASCII str
     if hello.get("type") != "hello" or not secrets.compare_digest(offered, expected.encode()):
-        print(f"(refused a connection from {peer}: bad or missing token)")
+        if not why:
+            why = (f"first message was {str(hello.get('type'))[:20]!r}, not hello" if hello.get("type") != "hello"
+                   else "wrong token")
+        print(f"(refused a connection from {peer}: {why})")
         await websocket.close(1008)
         return
     if robot_socket is not None:
