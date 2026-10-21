@@ -230,8 +230,9 @@ def _wake_pattern() -> re.Pattern:
 
 
 _WAKE_RE = _wake_pattern()
-# The name alone, only as the first word (config.WAKE_ON_NAME).
-_NAME_FIRST_RE = re.compile(rf"^\W*{re.escape(config.ROBOT_NAME)}\b[\s,.!?:;-]*", re.IGNORECASE)
+# A name alone, only as the first word (config.WAKE_ON_NAME); longest first.
+_NAMES_ALT = "|".join(r"\W+".join(map(re.escape, n.split())) for n in config.NAMES)
+_NAME_FIRST_RE = re.compile(rf"^\W*(?:{_NAMES_ALT})\b[\s,.!?:;-]*", re.IGNORECASE)
 
 
 def strip_wake_word(text: str) -> tuple[bool, str]:

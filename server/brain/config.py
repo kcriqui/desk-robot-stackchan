@@ -1,6 +1,7 @@
 """Central knobs for the desk-robot brain."""
 
 import os
+import re
 from pathlib import Path
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
@@ -17,8 +18,23 @@ if _ENV_FILE.is_file():
         if _v:  # a blank line in .env means "not set", not "set to nothing"
             os.environ.setdefault(_k.strip(), _v)
 
-# The robot's name — the wake word is "hey <name>".
-ROBOT_NAME = "Rocky"
+# The robot's name — the wake word is "hey <name>". ROBOT_NAME in server/.env
+# renames him (e.g. RockyChan), and ROBOT_ALIASES (comma-separated, e.g.
+# Rocky) are other names he answers to. The character is personality.py.
+ROBOT_NAME = os.environ.get("ROBOT_NAME", "Rocky")
+ROBOT_ALIASES = [a.strip() for a in os.environ.get("ROBOT_ALIASES", "").split(",") if a.strip()]
+
+
+def _spoken_forms(name: str) -> list[str]:
+    """How speech-to-text may write a name: "RockyChan" -> "rockychan" and
+    "rocky chan" (the wake-word match also accepts "Rocky-chan")."""
+    parts = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+", name) or [name]
+    return list(dict.fromkeys([name.lower(), " ".join(p.lower() for p in parts)]))
+
+
+# Every form of every name he answers to, longest first so "rocky chan" wins
+# over "rocky" when both match.
+NAMES = sorted({f for n in [ROBOT_NAME, *ROBOT_ALIASES] for f in _spoken_forms(n)}, key=len, reverse=True)
 
 # Your name — Rocky calls you this. Set HUMAN_NAME in server/.env so it
 # stays out of the repo; "friend" until you do.
@@ -113,7 +129,8 @@ DEBUG_TTS_CHECK = False
 
 # Listening. The robot's mic when it is connected, the computer's otherwise.
 LISTEN_ON_START = True
-WAKE_PHRASES = [  # what speech-to-text tends to hear for "hey Rocky"
+WAKE_PHRASES = [  # "hey"/"hi" + each name, then what speech-to-text tends to hear for "hey Rocky"
+    *(f"{greeting} {n}" for n in NAMES for greeting in ("hey", "hi")),
     "hey rocky",
     "hey rocket",
     "hey rocking",
@@ -121,6 +138,7 @@ WAKE_PHRASES = [  # what speech-to-text tends to hear for "hey Rocky"
     "a rocky",
     "hey ricky",
 ]
+WAKE_PHRASES = list(dict.fromkeys(WAKE_PHRASES))
 # Also wake on his name alone at the very start of a sentence ("Rocky, ...",
 # "Rocky."). A name further in ("I told Rocky...") still doesn't wake him.
 # On for the StackChan: its mic is quieter, and the soft "hey" often doesn't
@@ -162,10 +180,8 @@ CANCEL_MIN_SPEECH = 0.3
 DEBUG_SAVE_UTTERANCE = ""  # set to "debug/last_utterance.wav" to keep the last thing heard, for mic tuning
 AWAKE_SECONDS = 60.0     # after "hey Rocky" he stays awake; each thing you say
                          # resets this clock, and when it runs out he dozes off
-_NAME = ROBOT_NAME.lower()
 SLEEP_PHRASES = [        # any of these puts him to sleep until the next "hey <name>"
-    f"{_NAME} sleep",
-    f"{_NAME} go to sleep",
+    *(f"{n} {s}" for n in NAMES for s in ("sleep", "go to sleep")),
     "go to sleep",
     "goodnight",
     "good night",
