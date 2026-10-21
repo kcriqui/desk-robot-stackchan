@@ -251,13 +251,15 @@ class NoBuiltinVoice(RuntimeError):
     """This computer has no speech engine we know how to drive."""
 
 
-# PowerShell script for Windows' built-in speech engine: text on stdin,
-# 16 kHz mono WAV out. Built and tested on macOS; this path is untested.
+# PowerShell script for Windows' built-in speech engine: UTF-8 text on stdin,
+# 16 kHz mono WAV out to $env:DESK_ROBOT_TTS_OUT. (Not $args: arguments after
+# -Command are appended to the script text, not passed in.)
 _WINDOWS_TTS = """
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Speech
 $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)
 $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
-$s.SetOutputToWaveFile($args[0], $fmt)
+$s.SetOutputToWaveFile($env:DESK_ROBOT_TTS_OUT, $fmt)
 $s.Speak([Console]::In.ReadToEnd())
 $s.Dispose()
 """
@@ -270,15 +272,17 @@ def _synthesize_builtin(text: str) -> bytes:
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         path = f.name
     try:
+        env = None
         if sys.platform == "darwin":
             cmd = ["say", "-v", config.TTS_FALLBACK_VOICE, "-o", path, "--data-format=LEI16@16000"]
         elif sys.platform == "win32":
-            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", _WINDOWS_TTS, path]
+            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", _WINDOWS_TTS]
+            env = {**os.environ, "DESK_ROBOT_TTS_OUT": path}
         elif shutil.which("espeak-ng") or shutil.which("espeak"):
             cmd = [shutil.which("espeak-ng") or "espeak", "--stdin", "-w", path]
         else:
             raise NoBuiltinVoice("no built-in voice on this system (install espeak-ng, or set FISH_AUDIO_API_KEY)")
-        subprocess.run(cmd, input=text.encode(), check=True, timeout=60)
+        subprocess.run(cmd, input=text.encode(), check=True, timeout=60, env=env)
         with open(path, "rb") as f:
             wav = f.read()
     finally:
