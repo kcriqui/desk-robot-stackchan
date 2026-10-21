@@ -47,9 +47,15 @@ if BODY not in ("desk-robot", "stackchan"):
 #   OpenAI      https://api.openai.com/v1          gpt-4.1-mini
 #
 # The model must accept images (Rocky sends camera frames) and tool calls
-# (he moves his head with them).
-LLM_BASE_URL = "https://openrouter.ai/api/v1"
-MODEL = "anthropic/claude-haiku-4.5"
+# (he moves his head with them). LLM_BASE_URL and MODEL in server/.env
+# override these, so switching provider needs no edit here.
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+MODEL = os.environ.get("MODEL", "anthropic/claude-haiku-4.5")
+# Token ceiling per model call. Only a backstop: REPLY_MAX_SENTENCES ends the
+# reply first and the stream is closed there. Models that think before
+# answering (Claude Haiku 5.5) count the thinking against it too, and a
+# ceiling of 200 cut their replies and tool calls short.
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "1024"))
 
 # WebSocket port the robot connects to.
 PORT = 8765

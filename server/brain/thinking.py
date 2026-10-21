@@ -217,7 +217,7 @@ class RobotBrain:
                 raise Interrupted()
             stream = self.client.chat.completions.create(
                 model=config.MODEL,
-                max_tokens=200,  # backstop; the sentence limit does the real work
+                max_tokens=config.LLM_MAX_TOKENS,  # backstop; the sentence limit does the real work
                 messages=[{"role": "system", "content": personality.SYSTEM_PROMPT}, *self.history],
                 tools=TOOLS if self.actions else openai.NOT_GIVEN,
                 stream=True,
@@ -279,12 +279,21 @@ class RobotBrain:
                 if buf.strip():
                     yield buf.strip()
                     buf = ""
+                for c in calls.values():
+                    # A reply cut short mid-call leaves "" or half a JSON
+                    # object; sending that back gets the next request refused.
+                    try:
+                        c["args"] = json.loads(c["arguments"] or "{}")
+                    except json.JSONDecodeError:
+                        c["args"] = {}
+                    if not isinstance(c["args"], dict):
+                        c["args"] = {}
                 self.history.append({
                     "role": "assistant",
                     "content": "".join(raw),
                     "tool_calls": [
                         {"id": c["id"], "type": "function",
-                         "function": {"name": c["name"], "arguments": c["arguments"]}}
+                         "function": {"name": c["name"], "arguments": json.dumps(c["args"])}}
                         for _, c in sorted(calls.items())
                     ],
                 })
@@ -292,10 +301,7 @@ class RobotBrain:
                 for _, c in sorted(calls.items()):
                     if cancelled.is_set():
                         raise Interrupted()
-                    try:
-                        args = json.loads(c["arguments"] or "{}")
-                    except json.JSONDecodeError:
-                        args = {}
+                    args = c["args"]
                     action = self.actions.get(c["name"])
                     if action is None:
                         text = f"unknown ability {c['name']}"
