@@ -303,7 +303,37 @@ async def set_head_held(held: bool) -> None:
     head_held = held
 
 
+robot_asleep = False       # the last sleep state sent to the robot
+resume_tracking = False    # he was tracking when he fell asleep: pick it up again on waking
+
+
+async def set_asleep(on: bool) -> None:
+    """Shut or open his eyes. Every sleep and wake goes through here, so the
+    face can't be left asleep while he talks. Falling asleep pauses face
+    tracking (a sleeping robot shouldn't keep turning to follow you), and
+    waking resumes it."""
+    global robot_asleep, resume_tracking
+    robot_asleep = on
+    if on and tracker is not None and tracker.enabled:
+        await set_tracking(False, announce=False)
+        resume_tracking = True
+    elif not on and resume_tracking:
+        await set_tracking(True, announce=False)
+    await send_to_robot({"type": "asleep", "on": on})
+
+
+def situation() -> str:
+    """His current state, told to the model with every question."""
+    if tracker is None:
+        return "You have no face tracker running right now."
+    if tracker.enabled:
+        return "Right now you ARE following your human's face with your head (track_face is on)."
+    return "Right now you are NOT following your human's face (track_face is off)."
+
+
 async def set_tracking(on: bool, announce: bool = True) -> tuple[str, bytes | None]:
+    global resume_tracking
+    resume_tracking = False  # an explicit on/off (or the resume itself) settles it
     if tracker is None:
         return ("no tracker running", None)
     tracker.enabled = on
@@ -673,11 +703,11 @@ async def _console_command(action: str, payload: dict) -> dict:
         if payload.get("on", True):
             awake_until = 0.0
             await send_to_robot({"type": "emotion", "name": "sleepy"})
-            await send_to_robot({"type": "asleep", "on": True})
+            await set_asleep(True)
             await set_head_held(False)
         else:
             awake_until = time.time() + config.AWAKE_SECONDS
-            await send_to_robot({"type": "asleep", "on": False})
+            await set_asleep(False)
             await send_to_robot({"type": "emotion", "name": "neutral"})
     elif action in ("say", "ask"):
         text = str(payload.get("text", "")).strip()
@@ -797,7 +827,7 @@ async def doze_loop() -> None:
         awake = time.time() < awake_until
         if was_awake and not awake:
             print(f"({config.ROBOT_NAME} dozed off — say \"hey {config.ROBOT_NAME}\" to wake him)")
-            await send_to_robot({"type": "asleep", "on": True})
+            await set_asleep(True)
             await set_head_held(False)  # idle life resumes; the head may wander again
         was_awake = awake
 
@@ -842,6 +872,10 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
     print(f"{config.HUMAN_NAME}: {text}")
     eyes.last_heard = text
     awake_until = time.time() + config.AWAKE_SECONDS  # anything you say keeps him up
+    if robot_asleep and not woke:
+        # You started talking just before he dozed off, so he's answering:
+        # open his eyes. (A wake word opens them below, with the wake pose.)
+        await set_asleep(False)
     norm = normalize(text)
     lines = personality.LINES
     if any(p in norm for p in config.TRACK_ON_PHRASES) and not any(p in norm for p in config.TRACK_OFF_PHRASES):
@@ -863,14 +897,14 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
         print(f"{config.ROBOT_NAME} [sleepy]: {lines['sleep']}")
         await send_to_robot({"type": "emotion", "name": "sleepy"})
         await say(lines["sleep"])
-        await send_to_robot({"type": "asleep", "on": True})
+        await set_asleep(True)
         awake_until = 0.0  # say() doesn't touch it, but be explicit
         return
     if woke:
         # Heard his name: eyes open, perk up to TILT_WAKE (eye level on the
         # original build, where tilt can't go above 0 — the platform would
         # hit the pan servo; a little up on a StackChan).
-        await send_to_robot({"type": "asleep", "on": False})
+        await set_asleep(False)
         await send_to_robot({"type": "emotion", "name": "surprised"})
         if tracker is None or not tracker.tracking:
             await send_to_robot({"type": "tilt", "deg": config.TILT_WAKE})
@@ -922,6 +956,7 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     main_loop = loop
     brain = RobotBrain(ABILITIES)
+    brain.situation = situation
     tracker = Tracker(eyes, lambda p, t, on: loop.call_soon_threadsafe(head_moves.put_nowait, (p, t, on)))
     eyes.has_annotator = True
     tracker.start()

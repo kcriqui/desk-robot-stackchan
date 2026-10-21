@@ -123,6 +123,11 @@ class RobotBrain:
         )
         self.history: list[dict] = []
         self.actions = actions or {}
+        # Returns a line on his current state (e.g. whether he's tracking),
+        # added to every question: some changes never pass through the
+        # model (the "track me" shortcut, falling asleep), so it can't
+        # work them out from the conversation.
+        self.situation: Callable[[], str] | None = None
         self.emotion = "neutral"        # emotion of the reply in progress
         self._inflight: tuple[int, dict] | None = None  # (index, user message) being answered
 
@@ -155,6 +160,8 @@ class RobotBrain:
             content.append(_image_part(jpeg))
         elif camera_wanted:
             content.append({"type": "text", "text": "(Your camera has no fresh picture right now, so you cannot see anything at the moment.)"})
+        if self.situation is not None:
+            content.append({"type": "text", "text": f"({self.situation()})"})
         user_msg = {"role": "user", "content": content}
         self.history.append(user_msg)
         mark = len(self.history) - 1

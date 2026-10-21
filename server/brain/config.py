@@ -121,7 +121,12 @@ WAKE_PHRASES = [  # what speech-to-text tends to hear for "hey Rocky"
     "a rocky",
     "hey ricky",
 ]
-STT_MODEL = "base.en"    # faster-whisper model: base.en ~0.3 s per utterance on an Apple
+# Also wake on his name alone at the very start of a sentence ("Rocky, ...",
+# "Rocky."). A name further in ("I told Rocky...") still doesn't wake him.
+# On for the StackChan: its mic is quieter, and the soft "hey" often doesn't
+# make it into the transcript.
+WAKE_ON_NAME = BODY == "stackchan"
+STT_MODEL = "base.en"   # faster-whisper model: base.en ~0.3 s per utterance on an Apple
                          # Silicon Mac, small.en hears a little better but takes ~1 s
 # The Hugging Face commit of that model to download (Systran/faster-whisper-<STT_MODEL>).
 # Pinned so a changed upload can't be loaded unnoticed; set to None to take the latest.
