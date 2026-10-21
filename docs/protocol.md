@@ -23,6 +23,13 @@ Binary `0x02` frames: one camera JPEG per frame, QVGA (320×240) by
 default, sent continuously at `fps` while streaming is on. The server keeps
 the latest frame for the live-view page, the face tracker, and the language model.
 
+Binary `0x03` frames (firmware-stackchan): the same JPEG, tagged with where
+the head pointed when it was taken. Payload: pan, then tilt, each a
+little-endian int16 in tenths of a degree (head degrees, as in `pan`/`tilt`
+below), then the JPEG. With the angle, the face tracker aims from where the
+head really was instead of guessing, so it needn't wait for the head to
+settle. The server takes either type.
+
 ## Server → robot
 
 ```json

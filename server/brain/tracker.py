@@ -64,7 +64,7 @@ class Tracker:
         seq = -1
         while True:
             seq = self.eyes.wait_for_new(seq, timeout=1.0)
-            jpeg = self.eyes.jpeg
+            jpeg, pose = self.eyes.frame_and_pose()
             if not jpeg:
                 continue
             img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
@@ -83,7 +83,7 @@ class Tracker:
             if face is not None:
                 self.last_seen = now
                 self._lost_reported = False
-                self._steer(face, w, h, now)
+                self._steer(face, w, h, now, pose)
             elif self.tracking and now - self.last_seen > config.TRACK_LOST_SECONDS:
                 # Lost them: hand the head back to its idle glances.
                 self.tracking = False
@@ -93,20 +93,33 @@ class Tracker:
 
             self.eyes.publish(self._annotate(img, face, w, h))
 
-    def _steer(self, face: tuple[int, int, int, int], w: int, h: int, now: float) -> None:
-        if now - self._last_sent < config.TRACK_SETTLE_S:
+    def _steer(self, face: tuple[int, int, int, int], w: int, h: int, now: float,
+               pose: tuple[float, float] | None = None) -> None:
+        """pose: where the head pointed when this frame was taken, if the robot
+        says (0x03 frames). Then aim from there: the target can't pile up while
+        the head is still moving, so there's no need to wait for it to settle.
+        Without it, nudge our estimate and let TRACK_SETTLE_S guard overshoot."""
+        if pose is None and now - self._last_sent < config.TRACK_SETTLE_S:
             return  # still moving: this frame shows where the head was, not where it is
         x, y, fw, fh = face
         ex = ((x + fw / 2) - w / 2) / (w / 2)   # -1 (left edge) .. +1 (right edge)
         ey = ((y + fh / 2) - h / 2) / (h / 2)   # -1 (top) .. +1 (bottom)
         moved = False
         if abs(ex) > config.TRACK_DEADBAND:
-            self.pan += config.TRACK_PAN_SIGN * ex * (config.TRACK_HFOV / 2) * config.TRACK_GAIN
+            step = config.TRACK_PAN_SIGN * ex * (config.TRACK_HFOV / 2)
+            if pose is not None:
+                self.pan = pose[0] + step * config.TRACK_POSE_GAIN
+            else:
+                self.pan += step * config.TRACK_GAIN
             self.pan = max(-config.TRACK_PAN_LIMIT, min(config.TRACK_PAN_LIMIT, self.pan))
             moved = True
         if abs(ey) > config.TRACK_DEADBAND:
             # Face above center → look up (tilt toward its max); below → look down.
-            self.tilt += config.TRACK_TILT_SIGN * (-ey) * (config.TRACK_VFOV / 2) * config.TRACK_GAIN
+            step = config.TRACK_TILT_SIGN * (-ey) * (config.TRACK_VFOV / 2)
+            if pose is not None:
+                self.tilt = pose[1] + step * config.TRACK_POSE_GAIN
+            else:
+                self.tilt += step * config.TRACK_GAIN
             self.tilt = max(config.TRACK_TILT_MIN, min(config.TRACK_TILT_MAX, self.tilt))
             moved = True
         became_tracking = not self.tracking

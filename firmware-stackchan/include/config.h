@@ -48,8 +48,9 @@ constexpr float MIC_GAIN = 1.0f;
 
 // ─── Camera ──────────────────────────────────────────────────────────────────
 // The CoreS3's GC0308 has no hardware JPEG, so frames are compressed in
-// software. That costs CPU, so the stream is capped below what the brain asks.
-constexpr float CAMERA_MAX_FPS = 8.0f;
+// software. That costs CPU, so the stream is capped. The `diag` line on
+// serial shows the grab + encode time per frame.
+constexpr float CAMERA_MAX_FPS = 15.0f;
 constexpr int CAMERA_JPEG_QUALITY = 60;  // 1-100, higher = better (~8-15 KB QVGA)
 constexpr bool CAMERA_VFLIP = false;
 constexpr bool CAMERA_HMIRROR = false;

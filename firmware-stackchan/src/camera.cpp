@@ -31,7 +31,10 @@ bool Camera::begin() {
   cfg.xclk_freq_hz = 20000000;
   cfg.ledc_timer = LEDC_TIMER_0;
   cfg.ledc_channel = LEDC_CHANNEL_0;
-  cfg.pixel_format = PIXFORMAT_RGB565;  // no hardware JPEG on this sensor
+  // No hardware JPEG on this sensor. RGB565, not YUV422: esp32-camera's
+  // frame2jpg converts YUV to RGB and back again, and measured 142 ms per
+  // frame against ~89 ms for RGB565 (2026-10-21).
+  cfg.pixel_format = PIXFORMAT_RGB565;
   cfg.frame_size = FRAMESIZE_QVGA;      // 320x240: what the tracker and live view expect
   cfg.jpeg_quality = 0;
   cfg.fb_count = 2;
@@ -68,12 +71,14 @@ void Camera::setStreaming(bool on, float fps) {
   streaming_ = on;
 }
 
-size_t Camera::takeFrame(uint8_t* out, size_t cap) {
+size_t Camera::takeFrame(uint8_t* out, size_t cap, float* pan, float* tilt) {
   size_t n = 0;
   portENTER_CRITICAL(&lock_);
   if (fresh_ && latestLen_ <= cap) {
     n = latestLen_;
     memcpy(out, latest_, n);
+    if (pan) *pan = latestPan_;
+    if (tilt) *tilt = latestTilt_;
     fresh_ = false;
   }
   portEXIT_CRITICAL(&lock_);
@@ -91,15 +96,25 @@ void Camera::task() {
     uint32_t t0 = millis();
     camera_fb_t* fb = esp_camera_fb_get();
     if (fb != nullptr) {
+      // Where the head was pointing for this picture: read now, not when the
+      // JPEG is done ~90 ms later, by which time it may have moved on.
+      float pan = 0, tilt = 0;
+      if (poseSource_) poseSource_(pan, tilt);
       uint8_t* jpg = nullptr;
       size_t len = 0;
       bool encoded = frame2jpg(fb, CAMERA_JPEG_QUALITY, &jpg, &len);
       esp_camera_fb_return(fb);
       encodeMs_ = millis() - t0;
+      uint32_t enc = encodeMs_;  // grab + encode, the same span `snap` reports
+      encSum_ = encSum_ + enc;
+      encN_ = encN_ + 1;
+      if (enc > encMax_) encMax_ = enc;
       if (encoded && len <= latestCap_) {
         portENTER_CRITICAL(&lock_);
         memcpy(latest_, jpg, len);
         latestLen_ = len;
+        latestPan_ = pan;
+        latestTilt_ = tilt;
         fresh_ = true;
         portEXIT_CRITICAL(&lock_);
         captured_ = captured_ + 1;

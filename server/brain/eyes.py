@@ -31,6 +31,7 @@ from . import config
 class Eyes:
     def __init__(self) -> None:
         self.jpeg: bytes = b""          # newest raw frame from the robot
+        self.pose: tuple[float, float] | None = None  # head (pan, tilt) when it was taken
         self.frame_at = 0.0
         self.frame_seq = 0
         self.display: bytes = b""       # what the browser shows (annotated if a tracker runs)
@@ -48,10 +49,13 @@ class Eyes:
         self._cond = threading.Condition()
 
     # ── robot → server ──────────────────────────────────────────────────────
-    def push_frame(self, jpeg: bytes) -> None:
+    def push_frame(self, jpeg: bytes, pose: tuple[float, float] | None = None) -> None:
+        """pose: the head's (pan, tilt) when the frame was taken, if the
+        robot sends it (0x03 frames); None for plain 0x02 frames."""
         now = time.time()
         with self._cond:
             self.jpeg = jpeg
+            self.pose = pose
             self.frame_at = now
             self.frame_seq += 1
             self.frames += 1
@@ -89,6 +93,11 @@ class Eyes:
         with self._cond:
             self._cond.wait_for(lambda: self.frame_seq != seen_seq, timeout=timeout)
             return self.frame_seq
+
+    def frame_and_pose(self) -> tuple[bytes, tuple[float, float] | None]:
+        """The newest frame and the head pose it was taken at, as a pair."""
+        with self._cond:
+            return self.jpeg, self.pose
 
     # ── browser ─────────────────────────────────────────────────────────────
     def serve(self, port: int, bind: str = "127.0.0.1") -> None:

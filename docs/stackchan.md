@@ -89,15 +89,30 @@ same folder. Fill in your WiFi, the computer's address, and the same
 
 ## Tuning
 
+- **How face tracking works here.** Each camera frame carries the head's
+  actual angle, read from the servos when the picture was taken. The
+  tracker aims from that angle (`TRACK_POSE_GAIN`), so it doesn't have to
+  wait for the head to settle between moves. On one robot it re-centres a
+  face 20° off in about 1.2–1.4 s, where the original robot's method took
+  2.6 s.
 - **Face tracking overshoots or lags.** `TRACK_HFOV` and `TRACK_VFOV` in
   `server/brain/config.py` (the `BODY == "stackchan"` block) are estimates
-  for the GC0308 lens. Lower them if the head overshoots your face. If it
-  turns away from you, flip `TRACK_PAN_SIGN`.
+  for the GC0308 lens. Lower them if the head overshoots your face, or lower
+  `TRACK_POSE_GAIN`. If it turns away from you, flip `TRACK_PAN_SIGN`.
+- **Tracking stops just short of your face.** The little servos stop up to
+  about 4° short of a target. `TRACK_DEADBAND` (0.15 here, about ±4.5°) is
+  how close counts as centred; much tighter than the servos can reach, and
+  the head waits on a move that never comes.
 - **Camera picture upside down or mirrored.** `CAMERA_VFLIP` and
   `CAMERA_HMIRROR` in the firmware config.
 - **Camera stream slow.** Compressing JPEGs in software is the costliest job
-  on the robot. `snap` prints how long one frame takes to encode.
+  on the robot, and it caps the stream at about 8 fps at 320×240.
   `CAMERA_JPEG_QUALITY` trades size and time against detail.
+- **Diagnostics.** Every 5 s the serial console prints a `diag:` line: free
+  memory, the longest pause in each part of the main loop, camera grab +
+  encode time, frames captured and sent, and WiFi signal. It's the first
+  place to look if the link to the brain stalls. Don't use `snap` while the
+  brain is connected: it pauses the robot for up to 2 s.
 - **He doesn't hear you, or clips.** `MIC_GAIN` in the firmware config, and
   `miclevel` in the serial console to watch the level.
 - **Voice too quiet or harsh.** `volume` in either console. The speaker is
@@ -120,9 +135,15 @@ On one StackChan, over USB (2026-10-17), these all work as expected:
 These points still need trying. If you're first, say how it went.
 
 - Whether pitch 0 is level on every unit, not just one.
-- Talking to the brain over WiFi: wake word, replies, `look`, face tracking.
-- The GC0308's field of view, and how many fps software JPEG really reaches
-  while WiFi and audio are busy.
+- The GC0308's field of view.
+
+## Known issues
+
+- **After `pio run -t upload`, press reset.** The upload ends with "Hard
+  resetting via RTS pin", but the CoreS3 often stays in download mode until
+  the reset button is pressed. To look into: esptool's
+  `--after watchdog-reset` (via `upload_flags` in platformio.ini) is meant
+  for the ESP32-S3's built-in USB and may fix it.
 
 ## Keeping up with the original
 

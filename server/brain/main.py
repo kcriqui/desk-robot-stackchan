@@ -36,6 +36,7 @@ import json
 import os
 import queue
 import secrets
+import struct
 import sys
 import threading
 import time
@@ -162,6 +163,10 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
                     ears.push_audio(message[1:])  # 1 type byte + whole 16-bit samples
                 elif kind == b"\x02":
                     eyes.push_frame(message[1:])
+                elif kind == b"\x03" and len(message) > 5:
+                    # Head pan/tilt at capture (int16 tenths of a degree), then the JPEG.
+                    pan, tilt = struct.unpack_from("<hh", message, 1)
+                    eyes.push_frame(message[5:], pose=(pan / 10.0, tilt / 10.0))
                 continue
             try:
                 event = json.loads(message)

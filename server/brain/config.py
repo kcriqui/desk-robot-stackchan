@@ -212,6 +212,9 @@ TRACK_HFOV = 62.0          # camera field of view, degrees (OV2640 stock lens)
 TRACK_VFOV = 48.0
 TRACK_GAIN = 0.5           # fraction of the error corrected per frame (lower = calmer)
 TRACK_DEADBAND = 0.10      # ignore errors smaller than this fraction of half-frame
+TRACK_POSE_GAIN = 0.8      # fraction of the error to aim for when frames carry the head's
+                           # angle (firmware-stackchan): aimed from where the head really
+                           # was, so it can be high; under 1 allows for a rough TRACK_HFOV
 TRACK_PAN_SIGN = 1         # flip to -1 if the head turns AWAY from you
 TRACK_TILT_SIGN = 1        # flip to -1 if it nods the wrong way
 TRACK_PAN_LIMIT = 60.0     # must match PAN_MIN/MAX_DEG in firmware config.h
@@ -225,17 +228,23 @@ if BODY == "stackchan":
     # Must match firmware-stackchan/include/config.h.
     TRACK_HFOV = 60.0      # CoreS3 GC0308; approximate, lower it if tracking overshoots
     TRACK_VFOV = 45.0
-    # Its head eases into place and its frames arrive late (software JPEG),
-    # so steer gently and only from frames taken after the head settled.
-    # At the original robot's settings it overshot to the ceiling.
+    # Its frames carry the head's angle (0x03), so tracking aims from that
+    # (TRACK_POSE_GAIN). Gain and settle below are for frames without it:
+    # its head eases into place and frames arrive late, and at the original
+    # robot's settings it overshot to the ceiling.
     TRACK_GAIN = 0.3
     TRACK_SETTLE_S = 0.4
+    # Its little servos stop up to ~4 deg short of a target, so a tighter
+    # "centred" zone than that leaves the tracker waiting on a move that
+    # never comes. 0.15 of the half-frame is about 4.5 deg.
+    TRACK_DEADBAND = 0.15
     TRACK_PAN_LIMIT = 120.0
     TRACK_TILT_MIN = 0.0   # level is as low as it goes
     TRACK_TILT_MAX = 90.0
     TILT_REST = 20.0       # it sits on the desk below your eyes: rest looking a little up
     TILT_WAKE = 20.0
     NOD = "up"
+    CAMERA_FPS = 15        # ask for more: firmware-stackchan caps it at CAMERA_MAX_FPS
 TRACK_LOST_SECONDS = 4.0   # no face this long → idle glances resume
 
 # How many conversation turns to remember before forgetting the oldest.

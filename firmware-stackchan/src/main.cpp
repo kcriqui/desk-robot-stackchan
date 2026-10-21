@@ -41,6 +41,35 @@ bool demoMode = true;  // cycles emotions on its own; off while the brain is con
 bool brainConnected = false;
 bool glanceWanted = true;  // the brain's `glance on|off` (off while it holds a pose or tracks a face)
 
+// Every 5 s on serial: memory, the longest pause in each part of loop(), and
+// frames captured vs sent. For finding what stalls the link to the brain.
+struct Diag {
+  uint32_t loop = 0, link = 0, send = 0, face = 0, neck = 0;  // worst, microseconds
+  uint32_t framesSent = 0;
+} diag;
+uint32_t nextDiagMs = 5000;
+uint32_t lastCaptured = 0;
+
+void printDiag(uint32_t nowMs) {
+  if (nowMs < nextDiagMs) return;
+  nextDiagMs = nowMs + 5000;
+  uint32_t captured = camera.framesCaptured();
+  float encAvg = 0;
+  uint32_t encMax = 0;
+  camera.takeEncodeStats(encAvg, encMax);
+  Serial.printf("diag: heap %u KB (min %u, block %u) psram %u KB | worst ms: loop %u link %u send %u face %u neck %u"
+                " | cam %.1f fps (grab+encode avg %.0f ms, max %u) sent %.1f fps | wifi %d dBm %s\n",
+                heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
+                heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024,
+                heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024,
+                heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
+                diag.loop / 1000, diag.link / 1000, diag.send / 1000, diag.face / 1000, diag.neck / 1000,
+                (captured - lastCaptured) / 5.0f, encAvg, encMax, diag.framesSent / 5.0f, WiFi.RSSI(),
+                brainLink.connected() ? "brain up" : "brain DOWN");
+  lastCaptured = captured;
+  diag = Diag{};
+}
+
 // Idle glances only while Rocky is awake and his brain is connected. Asleep,
 // or with no server running, the head stays still.
 void applyGlances() {
@@ -219,6 +248,13 @@ void setup() {
   speaker.begin(&mic, SPEAKER_VOLUME, []() { speakDonePending = true; });
   // Last: it borrows the internal I2C bus the others set up on.
   if (camera.begin()) Serial.println(F("camera: ready"));
+  // Each frame is tagged with the head's actual angle (read from the servos),
+  // in the same head degrees the brain uses.
+  camera.setPoseSource([](float& pan, float& tilt) {
+    auto a = M5StackChan.Motion.getCurrentAngles();  // tenths of a degree
+    pan = (PAN_INVERT ? -a.x : a.x) / 10.0f;
+    tilt = (TILT_INVERT ? -a.y : a.y) / 10.0f;
+  });
 
   demoMode = true;
   face.setIdle(true);
@@ -270,9 +306,11 @@ void loop() {
   if (M5StackChan.TouchSensor.wasPressed()) face.blink();
 
   uint32_t now = millis();
+  uint32_t t0 = micros();
 
 #if HAVE_BRAIN
   brainLink.update(now);
+  diag.link = max(diag.link, micros() - t0);
   if (speakDonePending) {
     speakDonePending = false;
     brainLink.sendJson("{\"type\":\"speak_done\"}");
@@ -287,9 +325,21 @@ void loop() {
     }
   }
   if (brainLink.connected() && camera.streaming()) {
-    static uint8_t* jpg = static_cast<uint8_t*>(ps_malloc(64 * 1024));
-    size_t n = jpg ? camera.takeFrame(jpg, 64 * 1024) : 0;
-    if (n > 0) brainLink.sendBinary(0x02, jpg, n);
+    // 0x03 frame: pan and tilt at capture (int16 tenths of a degree,
+    // little-endian), then the JPEG. See docs/protocol.md.
+    static const size_t POSE_BYTES = 4;
+    static uint8_t* buf = static_cast<uint8_t*>(ps_malloc(64 * 1024));
+    float pan = 0, tilt = 0;
+    size_t n = buf ? camera.takeFrame(buf + POSE_BYTES, 64 * 1024 - POSE_BYTES, &pan, &tilt) : 0;
+    if (n > 0) {
+      int16_t p = static_cast<int16_t>(lroundf(pan * 10)), t = static_cast<int16_t>(lroundf(tilt * 10));
+      memcpy(buf, &p, 2);  // the ESP32 is little-endian
+      memcpy(buf + 2, &t, 2);
+      uint32_t ts = micros();
+      brainLink.sendBinary(0x03, buf, n + POSE_BYTES);
+      diag.send = max(diag.send, micros() - ts);
+      diag.framesSent++;
+    }
   }
   if (brainLink.connected() && now >= nextTempMs) {
     nextTempMs = now + 10000;
@@ -315,8 +365,15 @@ void loop() {
   if (now - lastFrameMs >= FRAME_INTERVAL_MS) {
     lastFrameMs = now;
     face.setTalking(speaker.speaking(), speaker.level());
+    uint32_t tf = micros();
     face.update(now);
+    diag.face = max(diag.face, micros() - tf);
+    uint32_t tn = micros();
     panNeck.update(now);
     tiltNeck.update(now);
+    diag.neck = max(diag.neck, micros() - tn);
   }
+
+  diag.loop = max(diag.loop, micros() - t0);
+  printDiag(now);
 }
