@@ -11,13 +11,16 @@
 // Angles are "head degrees", the same units the brain sends (docs/protocol.md):
 // pan 0 = straight ahead, negative = robot's left; tilt 0 = level, positive = up.
 //
-// The StackChan's neck is the opposite of the original build's: it rests level
-// and looks UP (pitch 0-90 deg), where the original only nods down. Keep the
-// server's BODY=stackchan limits (server/brain/config.py) in step with these.
-constexpr float PAN_MIN_DEG = -90.0f;  // the servo can do +/-128, but the cable can't
-constexpr float PAN_MAX_DEG = 90.0f;
-constexpr float TILT_MIN_DEG = 0.0f;   // level: the pitch servo's lower stop
-constexpr float TILT_MAX_DEG = 60.0f;  // 90 is straight at the ceiling
+// The StackChan's neck is the opposite of the original build's: it can't tilt
+// below level, only UP (pitch 0-90 deg), where the original only nods down.
+// It sits on a desk below its human's eyes, so it rests looking a little up
+// and can still drop to level to see the desk. Keep the server's
+// BODY=stackchan limits (server/brain/config.py) in step with these.
+constexpr float PAN_MIN_DEG = -120.0f;  // the BSP stops yaw at +/-128 (position
+constexpr float PAN_MAX_DEG = 120.0f;   // control ends there); keep a margin
+constexpr float TILT_MIN_DEG = 0.0f;    // level: the pitch servo's lower stop
+constexpr float TILT_MAX_DEG = 90.0f;   // straight up at the ceiling
+constexpr float TILT_REST_DEG = 20.0f;  // boot pose and `center`
 
 // Flip if `pan -30` turns the head to ITS right instead of its left, or if
 // `tilt 20` looks down. Both defaults checked on a StackChan (2026-10-17).

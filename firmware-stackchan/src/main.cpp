@@ -56,7 +56,7 @@ void printHelp() {
   Serial.println(F("  emo <name>   neutral|happy|sad|angry|surprised|sleepy|thinking"));
   Serial.printf("  pan <deg>    turn head, %.0f..%.0f (0 = center, - = its left)\n", PAN_MIN_DEG, PAN_MAX_DEG);
   Serial.printf("  tilt <deg>   tilt head, %.0f (level)..%.0f (up)\n", TILT_MIN_DEG, TILT_MAX_DEG);
-  Serial.println(F("  center       head to center on both axes"));
+  Serial.printf("  center       head straight ahead, tilted %.0f up (rest pose)\n", TILT_REST_DEG);
   Serial.println(F("  raw pan|tilt <deg>  calibration move that ignores the limits (watch it!)"));
   Serial.println(F("  torque on|off  hold the head, or let it go limp to position by hand"));
   Serial.println(F("  zero         make the current head pose the new center (saved)"));
@@ -112,8 +112,8 @@ void handleCommand(String line) {
     Serial.printf("raw %s -> %.0f deg (limits ignored)\n", axis.c_str(), deg);
   } else if (cmd == "center") {
     panNeck.setTarget(0);
-    tiltNeck.setTarget(0);
-    Serial.println(F("head -> center"));
+    tiltNeck.setTarget(TILT_REST_DEG);
+    Serial.printf("head -> center (tilt %.0f)\n", TILT_REST_DEG);
   } else if (cmd == "torque") {
     M5StackChan.Motion.setTorqueEnabled(arg != "off");
     Serial.printf("torque %s\n", arg == "off" ? "off — move the head by hand" : "on");
@@ -208,7 +208,7 @@ void setup() {
   panNeck.begin(ServoNeck::Axis::Pan, PAN_MIN_DEG, PAN_MAX_DEG, PAN_SPEED,
                 PAN_GLANCE_DEG, PAN_INVERT);
   tiltNeck.begin(ServoNeck::Axis::Tilt, TILT_MIN_DEG, TILT_MAX_DEG, TILT_SPEED,
-                 TILT_GLANCE_DEG, TILT_INVERT);
+                 TILT_GLANCE_DEG, TILT_INVERT, TILT_REST_DEG);
 
   mic.begin(MIC_GAIN);
   speaker.begin(&mic, SPEAKER_VOLUME, []() { speakDonePending = true; });

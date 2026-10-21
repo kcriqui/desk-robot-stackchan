@@ -13,8 +13,9 @@ class ServoNeck {
  public:
   enum class Axis : uint8_t { Pan, Tilt };
 
+  // restDeg: the pose it goes to at boot.
   void begin(Axis axis, float minDeg, float maxDeg, int speed,
-             float glanceRangeDeg, bool invert);
+             float glanceRangeDeg, bool invert, float restDeg = 0.0f);
 
   void setTarget(float deg);
   // Calibration only: go straight to a head angle, ignoring our limits (the

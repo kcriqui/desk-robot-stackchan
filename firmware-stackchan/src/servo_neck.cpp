@@ -7,14 +7,14 @@
 static const uint32_t SEND_INTERVAL_MS = 40;
 
 void ServoNeck::begin(Axis axis, float minDeg, float maxDeg, int speed,
-                      float glanceRangeDeg, bool invert) {
+                      float glanceRangeDeg, bool invert, float restDeg) {
   axis_ = axis;
   minDeg_ = minDeg;
   maxDeg_ = maxDeg;
   speed_ = constrain(speed, 0, 1000);
   glanceRange_ = glanceRangeDeg;
   invert_ = invert;
-  targetDeg_ = restDeg_ = constrain(0.0f, minDeg_, maxDeg_);
+  targetDeg_ = restDeg_ = constrain(restDeg, minDeg_, maxDeg_);
   nextGlanceMs_ = millis() + 5000;
   dirty_ = true;  // go to the start pose on the first update
 }

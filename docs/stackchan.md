@@ -15,7 +15,7 @@ the firmware is different, and it speaks the same
 | | Original (`firmware/`) | StackChan (`firmware-stackchan/`) |
 | --- | --- | --- |
 | Face | 128x64 OLED | The same face, scaled 2.5x onto the 320x240 LCD |
-| Neck | SG90 PWM servos, nods **down** from level | SCS0009 serial-bus servos, looks **up** from level (0 to 60°), turns ±90° |
+| Neck | SG90 PWM servos, nods **down** from level | SCS0009 serial-bus servos, looks **up** from level (0 to 90°), rests 20° up, turns ±120° |
 | Camera | OV2640, JPEG in hardware | GC0308, JPEG in software, capped at 8 fps |
 | Mic / speaker | Separate I2S buses | One shared bus: the mic pauses while Rocky speaks (the brain mutes it then anyway) |
 | Extras | | Pat his head and he blinks. `battery` reports the pack. |

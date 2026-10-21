@@ -45,6 +45,8 @@ _NECK_LIMIT = (
 )
 _NOD_MAX = int(max(abs(config.TRACK_TILT_MIN), abs(config.TRACK_TILT_MAX)))
 _PAN_MAX = int(config.TRACK_PAN_LIMIT)
+_CENTER = ("straight ahead and level" if not config.TILT_REST else
+           f"straight ahead, tilted {config.TILT_REST:.0f} deg up (your resting pose)")
 
 TOOLS = [
     {
@@ -67,7 +69,7 @@ TOOLS = [
                         "enum": ["left", "right", _NOD, "level", "center"],
                         "description": (
                             f"left/right turn the head only (no nod); {_NOD}/level nod only (no turn); "
-                            "center = straight ahead and level"
+                            f"center = {_CENTER}"
                         ),
                     },
                     "degrees": {

@@ -212,16 +212,24 @@ TRACK_TILT_SIGN = 1        # flip to -1 if it nods the wrong way
 TRACK_PAN_LIMIT = 60.0     # must match PAN_MIN/MAX_DEG in firmware config.h
 TRACK_TILT_MIN = -60.0     # must match TILT_MIN/MAX_DEG in firmware config.h
 TRACK_TILT_MAX = 0.0
+TRACK_SETTLE_S = 0.0       # after a move, ignore frames this long (they show where the head was)
+TILT_REST = 0.0            # "center": where the head sits when nothing else is going on
 TILT_WAKE = 0.0            # where his head comes up to when woken
 NOD = "down"               # which way the neck tilts from level (0): "down" or "up"
 if BODY == "stackchan":
     # Must match firmware-stackchan/include/config.h.
     TRACK_HFOV = 60.0      # CoreS3 GC0308; approximate, lower it if tracking overshoots
     TRACK_VFOV = 45.0
-    TRACK_PAN_LIMIT = 90.0
+    # Its head eases into place and its frames arrive late (software JPEG),
+    # so steer gently and only from frames taken after the head settled.
+    # At the original robot's settings it overshot to the ceiling.
+    TRACK_GAIN = 0.3
+    TRACK_SETTLE_S = 0.4
+    TRACK_PAN_LIMIT = 120.0
     TRACK_TILT_MIN = 0.0   # level is as low as it goes
-    TRACK_TILT_MAX = 60.0
-    TILT_WAKE = 15.0       # it sits low on the desk: perk up toward a face
+    TRACK_TILT_MAX = 90.0
+    TILT_REST = 20.0       # it sits on the desk below your eyes: rest looking a little up
+    TILT_WAKE = 20.0
     NOD = "up"
 TRACK_LOST_SECONDS = 4.0   # no face this long → idle glances resume
 

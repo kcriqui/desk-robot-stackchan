@@ -258,7 +258,7 @@ async def look(args: dict) -> tuple[str, bytes | None]:
     elif d == "level":
         tilt, move_tilt = 0.0, True
     elif d == "center":
-        pan, tilt, move_pan, move_tilt = 0.0, 0.0, True, True
+        pan, tilt, move_pan, move_tilt = 0.0, config.TILT_REST, True, True
     if not (move_pan or move_tilt):
         return (f"Say where to look: left, right, {config.NOD}, level, or center.", None)
     pan = max(-config.TRACK_PAN_LIMIT, min(config.TRACK_PAN_LIMIT, pan))
@@ -662,9 +662,9 @@ async def _console_command(action: str, payload: dict) -> dict:
     elif action == "center":
         await set_head_held(False)
         await send_to_robot({"type": "pan", "deg": 0})
-        await send_to_robot({"type": "tilt", "deg": 0})
+        await send_to_robot({"type": "tilt", "deg": config.TILT_REST})
         if tracker is not None:
-            tracker.note_pose(pan=0, tilt=0)
+            tracker.note_pose(pan=0, tilt=config.TILT_REST)
     elif action == "volume":
         await set_volume(_number(payload, "level", 0.0, 1.0))
     elif action == "track":

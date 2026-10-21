@@ -34,7 +34,7 @@ class Tracker:
         self.eyes = eyes
         self.on_pose = on_pose
         self.pan = 0.0     # our estimate of where the head is (deg)
-        self.tilt = 0.0
+        self.tilt = config.TILT_REST
         self.tracking = False
         self.face: tuple[int, int, int, int] | None = None  # x, y, w, h in the frame
         self.last_seen = 0.0
@@ -94,6 +94,8 @@ class Tracker:
             self.eyes.publish(self._annotate(img, face, w, h))
 
     def _steer(self, face: tuple[int, int, int, int], w: int, h: int, now: float) -> None:
+        if now - self._last_sent < config.TRACK_SETTLE_S:
+            return  # still moving: this frame shows where the head was, not where it is
         x, y, fw, fh = face
         ex = ((x + fw / 2) - w / 2) / (w / 2)   # -1 (left edge) .. +1 (right edge)
         ey = ((y + fh / 2) - h / 2) / (h / 2)   # -1 (top) .. +1 (bottom)
