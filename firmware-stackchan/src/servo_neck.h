@@ -23,6 +23,9 @@ class ServoNeck {
   void setRaw(float deg);
   float current() const { return commandedDeg_; }
   float target() const { return targetDeg_; }
+  // BSP spring speed, 0-1000; applies from the next move.
+  void setSpeed(int speed) { speed_ = constrain(speed, 0, 1000); }
+  int speed() const { return speed_; }
 
   // When idle glances are on, the head occasionally turns a little on its
   // own — paired with the face saccades it makes the robot feel alive.

@@ -87,6 +87,7 @@ void printHelp() {
   Serial.printf("  tilt <deg>   tilt head, %.0f (level)..%.0f (up)\n", TILT_MIN_DEG, TILT_MAX_DEG);
   Serial.printf("  center       head straight ahead, tilted %.0f up (rest pose)\n", TILT_REST_DEG);
   Serial.println(F("  raw pan|tilt <deg>  calibration move that ignores the limits (watch it!)"));
+  Serial.println(F("  speed <pan> [tilt]  neck speed 0-1000 until reboot (defaults in config.h)"));
   Serial.println(F("  torque on|off  hold the head, or let it go limp to position by hand"));
   Serial.println(F("  zero         make the current head pose the new center (saved)"));
   Serial.println(F("  blink        blink now"));
@@ -143,6 +144,15 @@ void handleCommand(String line) {
     panNeck.setTarget(0);
     tiltNeck.setTarget(TILT_REST_DEG);
     Serial.printf("head -> center (tilt %.0f)\n", TILT_REST_DEG);
+  } else if (cmd == "speed") {
+    // speed <pan> [tilt]: neck speed, 0-1000, until the next reboot. Find a
+    // value you like, then set PAN_SPEED / TILT_SPEED in config.h.
+    int sp = arg.indexOf(' ');
+    if (!arg.isEmpty()) {
+      panNeck.setSpeed(arg.toInt());
+      tiltNeck.setSpeed(sp < 0 ? arg.toInt() : arg.substring(sp + 1).toInt());
+    }
+    Serial.printf("speed: pan %d, tilt %d\n", panNeck.speed(), tiltNeck.speed());
   } else if (cmd == "torque") {
     M5StackChan.Motion.setTorqueEnabled(arg != "off");
     Serial.printf("torque %s\n", arg == "off" ? "off — move the head by hand" : "on");

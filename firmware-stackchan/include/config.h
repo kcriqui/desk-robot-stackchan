@@ -28,9 +28,12 @@ constexpr bool PAN_INVERT = false;
 constexpr bool TILT_INVERT = false;
 
 // Motion speed, 0-1000 (the BSP's spring speed). 500 is its default; higher
-// snaps, lower glides.
-constexpr int PAN_SPEED = 450;
-constexpr int TILT_SPEED = 350;
+// snaps, lower glides. Measured re-centring a face 20 deg off: 450 took
+// 1.18 s, 700 took 1.04 s with no overshoot, and 1000 overshot and took
+// 1.22 s. Tilt keeps the same proportion (not measured separately). Try
+// others live with the `speed` console command.
+constexpr int PAN_SPEED = 700;
+constexpr int TILT_SPEED = 550;
 
 // Release servo torque once the head is at rest, like the original build's
 // detach: quiet, cool and low-power. If the head sags when looking up, set
