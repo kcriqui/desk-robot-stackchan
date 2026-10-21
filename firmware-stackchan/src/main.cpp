@@ -195,6 +195,11 @@ void handleCommand(String line) {
 
 void setup() {
   Serial.begin(115200);
+  // Drop console output rather than wait when USB is plugged into a computer
+  // that isn't reading the port. Each print would otherwise block for up to
+  // 100 ms; with the brain's head commands echoed several times a second,
+  // that froze loop() for over a second and the brain dropped the link.
+  Serial.setTxTimeoutMs(0);
   randomSeed(esp_random());
 
   // M5Unified, the IO expander (servo power, LEDs), head touch, servos.
