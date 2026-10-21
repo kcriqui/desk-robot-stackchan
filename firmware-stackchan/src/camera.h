@@ -31,7 +31,6 @@ class Camera {
   size_t takeFrame(uint8_t* out, size_t cap, float* pan = nullptr, float* tilt = nullptr);
 
   uint32_t framesCaptured() const { return captured_; }
-  uint32_t lastEncodeMs() const { return encodeMs_; }
   // Grab + JPEG encode time per frame since the last call: average and worst, ms.
   void takeEncodeStats(float& avgMs, uint32_t& maxMs) {
     uint32_t n = encN_;
@@ -56,7 +55,6 @@ class Camera {
   PoseSource poseSource_;
   volatile bool fresh_ = false;
   volatile uint32_t captured_ = 0;
-  volatile uint32_t encodeMs_ = 0;
   volatile uint32_t encSum_ = 0, encN_ = 0, encMax_ = 0;
   portMUX_TYPE lock_ = portMUX_INITIALIZER_UNLOCKED;
 };

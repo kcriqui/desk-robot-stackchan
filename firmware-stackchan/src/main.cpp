@@ -211,8 +211,7 @@ void handleCommand(String line) {
       size_t n = 0;
       for (int i = 0; i < 80 && n == 0 && jpg; ++i) { delay(25); n = camera.takeFrame(jpg, 64 * 1024); }
       camera.setStreaming(was, CAMERA_MAX_FPS);
-      Serial.printf("snap: %u bytes (%s), encode %u ms\n", n, n ? "ok" : "no frame",
-                    camera.lastEncodeMs());
+      Serial.printf("snap: %u bytes (%s); encode time is on the diag line\n", n, n ? "ok" : "no frame");
     }
   } else if (cmd == "temp") {
     Serial.printf("chip %.1f C\n", temperatureRead());

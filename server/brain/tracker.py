@@ -97,10 +97,7 @@ class Tracker:
                pose: tuple[float, float] | None = None) -> None:
         """pose: where the head pointed when this frame was taken, if the robot
         says (0x03 frames). Then aim from there: the target can't pile up while
-        the head is still moving, so there's no need to wait for it to settle.
-        Without it, nudge our estimate and let TRACK_SETTLE_S guard overshoot."""
-        if pose is None and now - self._last_sent < config.TRACK_SETTLE_S:
-            return  # still moving: this frame shows where the head was, not where it is
+        the head is still moving. Without it, nudge our estimate by TRACK_GAIN."""
         x, y, fw, fh = face
         ex = ((x + fw / 2) - w / 2) / (w / 2)   # -1 (left edge) .. +1 (right edge)
         ey = ((y + fh / 2) - h / 2) / (h / 2)   # -1 (top) .. +1 (bottom)

@@ -104,8 +104,7 @@ void Camera::task() {
       size_t len = 0;
       bool encoded = frame2jpg(fb, CAMERA_JPEG_QUALITY, &jpg, &len);
       esp_camera_fb_return(fb);
-      encodeMs_ = millis() - t0;
-      uint32_t enc = encodeMs_;  // grab + encode, the same span `snap` reports
+      uint32_t enc = millis() - t0;  // grab + encode, for the diag line
       encSum_ = encSum_ + enc;
       encN_ = encN_ + 1;
       if (enc > encMax_) encMax_ = enc;
