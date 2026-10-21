@@ -92,7 +92,7 @@ async def send_to_robot(payload: dict) -> bool:
 
 
 def pick_mic_source() -> None:
-    """auto: the robot's mic while it's connected, the Mac's otherwise."""
+    """auto: the robot's mic while it's connected, the computer's otherwise."""
     if ears is None:
         return
     if config.MIC_SOURCE == "auto":
@@ -102,9 +102,9 @@ def pick_mic_source() -> None:
     if source != ears.source:
         ears.set_source(source)
         if source == "mac" and not ears.has_mac_mic:
-            print(f"(no Mac mic: {ears.mac_error} — nothing is listening until the robot connects)")
+            print(f"(no computer mic: {ears.mac_error} — nothing is listening until the robot connects)")
         else:
-            print(f"listening through the {'robot' if source == 'robot' else 'Mac'} mic")
+            print(f"listening through the {'robot' if source == 'robot' else 'computer'} mic")
 
 
 async def handle_robot(websocket: websockets.ServerConnection) -> None:
@@ -763,7 +763,7 @@ async def mic_meter() -> None:
     if ears is None:
         print("(not listening — type `listen` first)")
         return
-    which = "robot mic" if ears.source == "robot" else f"Mac mic \"{ears.device_name}\""
+    which = "robot mic" if ears.source == "robot" else f"computer mic \"{ears.device_name}\""
     print(f"{which}: talk for 3 seconds...")
     peak_level = 0.0
     peak_prob = 0.0
@@ -803,9 +803,12 @@ async def start_listening() -> None:
         print("  check: mic plugged in? Is your terminal allowed to use the microphone (macOS:")
         print("  System Settings > Privacy & Security > Microphone)? MIC_DEVICE in server/.env?")
         return
-    if ears.mac_error:
-        print(f"(Mac mic unavailable: {ears.mac_error})")
-        print("  the robot's mic still works; for a Mac fallback check MIC_DEVICE in server/.env,")
+    if config.MIC_SOURCE == "robot":
+        print(f"listening only through the robot's mic, once it connects (MIC_SOURCE=robot)"
+              f" — say \"hey {config.ROBOT_NAME}\"")
+    elif ears.mac_error:
+        print(f"(computer mic unavailable: {ears.mac_error})")
+        print("  the robot's mic still works; for a computer fallback check MIC_DEVICE in server/.env,")
         print("  plug the interface in, or allow the Terminal to use the microphone")
     else:
         print(f"listening on \"{mic}\" — say \"hey {config.ROBOT_NAME}\"")

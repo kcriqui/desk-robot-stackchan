@@ -133,8 +133,11 @@ STT_MODEL = "base.en"   # faster-whisper model: base.en ~0.3 s per utterance on 
 STT_REVISION = "3d3d5dee26484f91867d81cb899cfcf72b96be6c"
 STT_THREADS = 8          # CPU threads for transcription (0 = library default of 4)
 STT_PROMPT = f"Hey {ROBOT_NAME}. {ROBOT_NAME} is a robot."  # name hint for the model
-MIC_SOURCE = "auto"      # "robot" = the robot's mic, "mac" = MIC_DEVICE below,
-                         # "auto" = robot when it's connected, else this computer
+MIC_SOURCE = os.environ.get("MIC_SOURCE", "auto")
+                         # "robot" = only the robot's mic (nothing listens until it connects),
+                         # "mac" = this computer's mic (MIC_DEVICE below),
+                         # "auto" = robot when it's connected, else this computer.
+                         # Set MIC_SOURCE in server/.env to change it.
 MIC_DEVICE = os.environ.get("MIC_DEVICE") or None  # local input by name (set MIC_DEVICE in
                          # server/.env); None = system default. List devices: python -m sounddevice
 # Speech detection (server/brain/turn.py). A Silero VAD model decides whether

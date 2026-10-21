@@ -329,6 +329,11 @@ class Ears:
         failure is recorded in mac_error and start() still succeeds."""
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
+        if config.MIC_SOURCE == "robot":
+            # Robot mic only: don't open the computer's mic at all.
+            self.source = "robot"
+            self.mac_error = "not used (MIC_SOURCE=robot)"
+            return "the robot's mic"
         try:
             import sounddevice as sd
 
