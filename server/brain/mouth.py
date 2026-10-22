@@ -1,10 +1,14 @@
 """Mouth: turn the robot's words into sound.
 
-Two voices:
+Three voices (config.TTS_ENGINE picks; "auto" takes the first available):
   * Fish Audio (Rocky's real voice, config.TTS_VOICE_ID) when
     FISH_AUDIO_API_KEY is set. Plain HTTPS POST asking for raw 16 kHz PCM. The response body
     streams, so the first audio arrives ~0.3 s in, long before the sentence
     is finished, and is passed straight on to the speaker.
+  * Piper (config.PIPER_VOICE), a free voice that runs on this computer, when
+    it's installed (requirements-piper.txt; optional because it's GPL-3.0).
+    A sentence takes well under 0.1 s, then Praat (parselmouth) shifts its
+    pitch and resamples it to 16 kHz.
   * the computer's built-in voice as the fallback so the loop is audible
     before that's set up: `say` on macOS, Windows' speech engine through
     PowerShell, espeak-ng on Linux.
@@ -26,7 +30,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import importlib.util
 import urllib.request
 import wave
 from collections.abc import Iterator
@@ -43,6 +49,37 @@ FISH_TTS_URL = "https://api.fish.audio/v1/tts"
 
 def fish_available() -> bool:
     return bool(config.TTS_VOICE_ID and os.environ.get("FISH_AUDIO_API_KEY"))
+
+
+def piper_available() -> bool:
+    """Piper and parselmouth are installed (both optional, GPL-3.0)."""
+    return all(importlib.util.find_spec(m) is not None for m in ("piper", "parselmouth"))
+
+
+def engine() -> str:
+    """The voice to try first: fish, piper or builtin (config.TTS_ENGINE)."""
+    if config.TTS_ENGINE != "auto":
+        return config.TTS_ENGINE
+    if fish_available():
+        return "fish"
+    return "piper" if piper_available() else "builtin"
+
+
+def prepare() -> str:
+    """Load the voice ahead of the first reply (Piper takes a second or two,
+    plus a one-time download) and say which one will speak."""
+    e = engine()
+    if e == "fish":
+        return "voice: Fish Audio" if fish_available() else "voice: the computer's own (TTS_ENGINE=fish, but no FISH_AUDIO_API_KEY)"
+    if e == "piper":
+        if not piper_available():
+            return "voice: the computer's own (TTS_ENGINE=piper, but Piper isn't installed: pip install -r requirements-piper.txt)"
+        try:
+            _synthesize_piper("Hello.")  # loads the voice and warms it up (the first sentence is ~0.5 s slower)
+        except Exception as ex:
+            return f"voice: the computer's own (Piper failed to load: {ex})"
+        return f"voice: Piper {config.PIPER_VOICE}"
+    return "voice: the computer's own"
 
 
 _MARKUP = re.compile(r"[*_`#~<>\[\]{}|\\]")
@@ -247,6 +284,72 @@ def _wav_to_pcm16k(wav_bytes: bytes) -> bytes:
     return (np.clip(samples, -1, 1) * 32767).astype(np.int16).tobytes()
 
 
+_piper = None
+_piper_lock = threading.Lock()  # one synthesis at a time; also guards the first load
+
+
+def _piper_voice():
+    """The configured Piper voice, downloaded once (pinned and hash-checked
+    like the turn-taking models) and loaded once."""
+    global _piper
+    with _piper_lock:
+        if _piper is None:
+            from piper import PiperVoice  # optional, GPL-3.0; slow import, keep it lazy
+
+            from .turn import _fetch
+
+            key = config.PIPER_VOICE
+            lang, name, quality = key.split("-")
+            base = (f"https://huggingface.co/rhasspy/piper-voices/resolve/{config.PIPER_REVISION}/"
+                    f"{lang[:2]}/{lang}/{name}/{quality}/{key}")
+            files = {ext: _fetch(base + ext, key + ext, sha) for ext, sha in config.PIPER_VOICES[key]["sha256"].items()}
+            _piper = PiperVoice.load(str(files[".onnx"]), config_path=str(files[".onnx.json"]))
+        return _piper
+
+
+def _synthesize_piper(text: str) -> bytes:
+    """Rocky's words from Piper as 16 kHz s16le PCM, with the voice's tuning
+    from config.PIPER_VOICES and a pause after the sentence."""
+    import parselmouth  # optional, GPL-3.0 (Praat)
+    from parselmouth.praat import call
+    from piper import SynthesisConfig
+
+    voice = _piper_voice()
+    tune = config.PIPER_VOICES[config.PIPER_VOICE]
+    syn = SynthesisConfig(
+        length_scale=voice.config.length_scale / tune["speed"],  # speed 1 = the voice's own pace
+        noise_scale=voice.config.noise_scale if tune["noise"] is None else tune["noise"],
+        noise_w_scale=voice.config.noise_w_scale if tune["noise_w"] is None else tune["noise_w"],
+    )
+    with _piper_lock:
+        chunks = list(voice.synthesize(text, syn_config=syn))
+    if not chunks:
+        return b""
+    rate = chunks[0].sample_rate
+    gap = np.zeros(int(config.PIPER_SENTENCE_PAUSE * rate), dtype=np.float32)
+    parts: list[np.ndarray] = []
+    for c in chunks:  # Piper may split the text further; same pause between its pieces
+        parts += [c.audio_float_array, gap]
+    snd = parselmouth.Sound(np.concatenate(parts).astype(np.float64), rate)
+    if tune["pitch"]:
+        # Praat pitch manipulation: every pitch point times 2^(semitones/12),
+        # resynthesized by overlap-add, so the voice keeps its size and timing.
+        manip = call(snd, "To Manipulation", 0.01, 60, 500)
+        tier = call(manip, "Extract pitch tier")
+        call(tier, "Formula", f"self * {2 ** (tune['pitch'] / 12)}")
+        call([tier, manip], "Replace pitch tier")
+        snd = call(manip, "Get resynthesis (overlap-add)")
+    samples = snd.resample(SAMPLE_RATE, 50).values[0]  # band-limited, unlike _wav_to_pcm16k's
+    return (np.clip(samples, -1, 1) * 32767).astype(np.int16).tobytes()
+
+
+def _pieces(pcm: bytes, size: int = 4096) -> Iterator[bytes]:
+    """A finished buffer in Fish-sized chunks (~130 ms), so the Leveler
+    treats it the way it treats streamed audio."""
+    for i in range(0, len(pcm), size):
+        yield pcm[i:i + size]
+
+
 class NoBuiltinVoice(RuntimeError):
     """This computer has no speech engine we know how to drive."""
 
@@ -292,9 +395,9 @@ def _synthesize_builtin(text: str) -> bytes:
 
 def stream(text: str, leveler: Leveler | None = None) -> Iterator[bytes]:
     """Rocky's words as 16 kHz mono s16le PCM chunks, yielded as they're made.
-    Fish Audio when it's set up and reachable, else the computer's own voice
-    (all at once). Loudness is steadied by `leveler` (a fresh one if none is
-    given). A saved copy goes to debug/tts/ when DEBUG_SAVE_TTS is on."""
+    The voice engine() picks (Fish streams; Piper arrives a sentence at a
+    time), else the computer's own voice (all at once). Loudness is steadied
+    by `leveler` (a fresh one if none is given). A saved copy goes to debug/tts/ when DEBUG_SAVE_TTS is on."""
     text = clean_for_tts(text)
     if not text:
         return
@@ -304,12 +407,20 @@ def stream(text: str, leveler: Leveler | None = None) -> Iterator[bytes]:
     try:
         chunks: Iterator[bytes] | None = None
         first = b""
-        if fish_available():
+        e = engine()
+        if e == "fish" and fish_available():
             try:
                 chunks = _fish_stream(text)
                 first = next(chunks, b"")
-            except Exception as e:  # network, auth, bad voice id... still speak
-                print(f"(fish audio failed, using the built-in voice: {e})")
+            except Exception as ex:  # network, auth, bad voice id... still speak
+                print(f"(fish audio failed, using the built-in voice: {ex})")
+                chunks = None
+        elif e == "piper" and piper_available():
+            try:
+                chunks = _pieces(_synthesize_piper(text))
+                first = next(chunks, b"")
+            except Exception as ex:
+                print(f"(piper failed, using the built-in voice: {ex})")
                 chunks = None
         if chunks is None:
             try:
@@ -327,8 +438,8 @@ def stream(text: str, leveler: Leveler | None = None) -> Iterator[bytes]:
                     chunk = leveler.process(chunk)
                     parts.append(chunk)
                     yield chunk
-            except Exception as e:  # dropped mid-stream: say what we have
-                print(f"(fish audio stream cut short: {e})")
+            except Exception as ex:  # dropped mid-stream: say what we have
+                print(f"(voice stream cut short: {ex})")
         complete = True
     finally:
         if complete and parts and config.DEBUG_SAVE_TTS:

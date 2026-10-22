@@ -110,6 +110,50 @@ TTS_PRESENCE_DB = 0.0
 # Text-to-speech. The voice comes from Fish Audio (TTS_VOICE_ID above).
 TTS_FALLBACK_VOICE = "Fred"  # built-in voice used until Fish Audio is set up: a macOS `say`
                              # voice name (`say -v ?` lists them); Windows and Linux use their default
+
+# Which voice speaks. TTS_ENGINE in server/.env:
+#   auto     Fish Audio if FISH_AUDIO_API_KEY is set, else Piper if it's
+#            installed, else the computer's own voice (the default)
+#   fish / piper / builtin   that one, falling back to the computer's own
+#            voice if it can't speak
+TTS_ENGINE = os.environ.get("TTS_ENGINE", "auto").strip().lower()
+if TTS_ENGINE not in ("auto", "fish", "piper", "builtin"):
+    raise SystemExit(f"TTS_ENGINE={TTS_ENGINE!r} in server/.env: use auto, fish, piper or builtin")
+
+# Piper (github.com/OHF-Voice/piper1-gpl): a free voice that runs on this
+# computer, well under 0.1 s a sentence on a desktop CPU. Optional, and
+# GPL-3.0 licensed, so it's not in requirements.txt:
+#   pip install -r requirements-piper.txt
+# PIPER_VOICE in server/.env picks one of PIPER_VOICES. Each is tuned here:
+#   pitch   semitones up (+) or down (-); the voice keeps its size (Praat)
+#   speed   1 = the voice's own pace
+#   noise / noise_w   Piper's variation in sound / in timing; None = the
+#           voice's own default
+# Voice files download once into DESK_ROBOT_CACHE (~60 MB each), pinned to a
+# revision of rhasspy/piper-voices and checked against a SHA-256 first. To
+# add a voice, try it in a Piper sandbox, then add it here with its hashes.
+PIPER_REVISION = "5041a7a49ae5b3a0f30e6837769eb03fdbb231bd"
+PIPER_VOICES = {
+    "en_US-ryan-medium": {  # chosen 2026-10-21
+        "pitch": -1.25, "speed": 1.05, "noise": None, "noise_w": None,
+        "sha256": {
+            ".onnx": "abf4c274862564ed647ba0d2c47f8ee7c9b717d27bdad9219100eb310db4047a",
+            ".onnx.json": "44034c056cb15681b2ad494307c7f3f2e4499d1253c700c711fa0a4607ffe78d",
+        },
+    },
+    "en_US-hfc_male-medium": {  # plan B: its own defaults (it's set 25% faster than most)
+        "pitch": 0.0, "speed": 1.0, "noise": None, "noise_w": None,
+        "sha256": {
+            ".onnx": "d11e403a02bdf5a670c877b3dc56e0e1c8cece6fb30289586314dffdc0a78cb0",
+            ".onnx.json": "f66847424aed0bf99ecbb5d7cfde47c0a906f426a0daf7c46f305e7d21afd886",
+        },
+    },
+}
+PIPER_VOICE = os.environ.get("PIPER_VOICE", "en_US-ryan-medium").strip()
+if PIPER_VOICE not in PIPER_VOICES:
+    raise SystemExit(f"PIPER_VOICE={PIPER_VOICE!r} in server/.env: use one of {', '.join(PIPER_VOICES)}")
+# Silence after each sentence. Piper adds none of its own between sentences.
+PIPER_SENTENCE_PAUSE = 0.2
 # Loudness. Fish's level wanders from line to line, so the audio goes through
 # an automatic gain control (mouth.Leveler) that holds it near TTS_LEVEL
 # (RMS, 0..1) using at most TTS_MAX_GAIN of boost, with a soft limiter on
@@ -149,7 +193,9 @@ STT_MODEL = "base.en"   # faster-whisper model: base.en ~0.3 s per utterance on 
 # The Hugging Face commit of that model to download (Systran/faster-whisper-<STT_MODEL>).
 # Pinned so a changed upload can't be loaded unnoticed; set to None to take the latest.
 STT_REVISION = "3d3d5dee26484f91867d81cb899cfcf72b96be6c"
-STT_THREADS = 8          # CPU threads for transcription (0 = library default of 4)
+STT_THREADS = int(os.environ.get("STT_THREADS", "8"))  # CPU threads for transcription
+                         # (0 = library default of 4); STT_THREADS in server/.env or the
+                         # environment overrides it, e.g. 4 on a 4-core server
 STT_PROMPT = f"Hey {ROBOT_NAME}. {ROBOT_NAME} is a robot."  # name hint for the model
 MIC_SOURCE = os.environ.get("MIC_SOURCE", "auto")
                          # "robot" = only the robot's mic (nothing listens until it connects),
@@ -180,6 +226,19 @@ CANCEL_MIN_SPEECH = 0.3
 DEBUG_SAVE_UTTERANCE = ""  # set to "debug/last_utterance.wav" to keep the last thing heard, for mic tuning
 AWAKE_SECONDS = 60.0     # after "hey Rocky" he stays awake; each thing you say
                          # resets this clock, and when it runs out he dozes off
+# Speaking up on his own: timers he was asked to set, and warnings about his
+# battery and temperature. He waits for any conversation to finish, opens his
+# eyes to say it, and stays awake to hear your answer. Lines: personality.py.
+# Battery (StackChan only): (below this %, repeat every N minutes or None for
+# once, which line). Each lower level warns again, and more often.
+BATTERY_WARNINGS = [
+    (20, None, "battery_low"),
+    (10, 10, "battery_very_low"),
+    (5, 2, "battery_critical"),
+]
+# Chip temperature: he warns once above TEMP_WARN_C, and again (every 10 min)
+# from 5 degrees hotter. It resets once he's cooled 5 degrees below it.
+TEMP_WARN_C = 70.0
 SLEEP_PHRASES = [        # any of these puts him to sleep until the next "hey <name>"
     *(f"{n} {s}" for n in NAMES for s in ("sleep", "go to sleep")),
     "go to sleep",
@@ -203,6 +262,11 @@ EMOTIONS = [
 # Camera. The robot streams small JPEGs while connected; the live view
 # is at http://localhost:<LIVE_VIEW_PORT>/ on this computer.
 CAMERA_FPS = 10
+# Otherwise the camera only keeps the console page's picture fresh: full
+# rate is for following a face (and for a moment during a `look`). The
+# camera's frames are compressed in software, which heats the chip, so this
+# saves heat and battery. Asleep, the robot stops it altogether.
+CAMERA_IDLE_FPS = 1
 LIVE_VIEW_PORT = 8766
 LIVE_VIEW_BIND = "127.0.0.1"  # this computer only. "0.0.0.0" would show the camera to the whole LAN.
 SEND_CAMERA_TO_BRAIN = True  # let Rocky see the camera when a question is about seeing

@@ -6,10 +6,13 @@ The request is the OpenAI-style chat API, which OpenRouter, Anthropic and
 OpenAI all serve, so the provider is a base URL and the model is a string
 (config.LLM_BASE_URL / config.MODEL; the key is LLM_API_KEY in server/.env).
 
-Rocky has two real abilities the model can call (tool use): `look` moves
-the head and comes back with a fresh camera frame from the new angle, and
-`track_face` starts/stops following the human. main.py supplies the
-functions that actually do those things.
+Rocky has real abilities the model can call (tool use): `look` moves
+the head and comes back with a fresh camera frame from the new angle,
+`track_face` starts/stops following the human, `check_temperature` reads
+his chip's temperature, `set_timer` / `cancel_timer` manage reminders he
+announces himself, and on a StackChan `check_battery` reads his battery.
+main.py supplies the functions that actually do those things; only the
+tools it supplies are offered.
 """
 
 from __future__ import annotations
@@ -93,6 +96,60 @@ TOOLS = [
                 "type": "object",
                 "properties": {"on": {"type": "boolean"}},
                 "required": ["on"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_battery",
+            "description": (
+                "Read your battery: roughly how full it is, whether you are charging "
+                "or on USB power, and about how long it will last. Call it whenever "
+                "asked about your battery, charge, power or how long you can run."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_temperature",
+            "description": (
+                "Read the temperature of the chip inside your head (not the room's: you "
+                "have no room thermometer). Call it when asked how hot or warm you are."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_timer",
+            "description": (
+                "Set a timer or reminder; when it's due you announce it out loud. For a "
+                "clock time (\"at 6\"), work out the minutes from the current time you are "
+                "given. Always call it when asked; don't just promise to remember."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "minutes": {"type": "number", "description": "From now; may be fractional (0.5 = 30 s). Up to 1440."},
+                    "about": {"type": "string", "description": "What it's for, in a few words (\"tea\", \"call mom\"); empty for a plain timer."},
+                },
+                "required": ["minutes"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_timer",
+            "description": "Cancel a timer you set, by what it's for, or \"all\".",
+            "parameters": {
+                "type": "object",
+                "properties": {"about": {"type": "string"}},
+                "required": ["about"],
             },
         },
     },
@@ -221,6 +278,7 @@ class RobotBrain:
         Yields sentences as they complete."""
         nudged = False
         limit = config.REPLY_MAX_SENTENCES
+        tools = [t for t in TOOLS if t["function"]["name"] in self.actions]
         for _ in range(5):
             if cancelled.is_set():
                 raise Interrupted()
@@ -228,7 +286,7 @@ class RobotBrain:
                 model=config.MODEL,
                 max_tokens=config.LLM_MAX_TOKENS,  # backstop; the sentence limit does the real work
                 messages=[{"role": "system", "content": personality.SYSTEM_PROMPT}, *self.history],
-                tools=TOOLS if self.actions else openai.NOT_GIVEN,
+                tools=tools or openai.NOT_GIVEN,
                 stream=True,
             )
             buf = ""                 # text not yet released as a sentence

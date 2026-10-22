@@ -41,6 +41,7 @@ class Eyes:
         self.frames = 0
         self._fps_window: list[float] = []
         self.temperature: float | None = None
+        self.battery = None  # battery.Reading, on a StackChan
         self.last_heard = ""
         self.last_said = ""
         # main.py plugs in: extra /status fields, and the handler for /api/<action>.
@@ -175,6 +176,8 @@ class Eyes:
                         "frame_age_s": round(time.time() - eyes.frame_at, 1) if eyes.frame_at else None,
                         "frames": eyes.frames,
                         "temperature_c": eyes.temperature,
+                        "battery": eyes.battery.short() if eyes.battery else None,
+                        "battery_low": bool(eyes.battery and eyes.battery.low()),
                         "last_heard": eyes.last_heard,
                         "last_said": eyes.last_said,
                         # the head's range for this BODY, for the console's sliders

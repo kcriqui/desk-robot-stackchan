@@ -1,0 +1,7 @@
+# Optional: Piper, a free voice that runs on this computer (brain/mouth.py),
+# used when Fish Audio isn't set up. Install on top of requirements.txt:
+#   pip install -r requirements-piper.txt
+# Both packages are GPL-3.0 licensed, unlike this project (MIT), which is why
+# they're kept out of requirements.txt. Pinned to the versions tested (2026-10-21).
+piper-tts==1.8.0           # the voice (github.com/OHF-Voice/piper1-gpl)
+praat-parselmouth==0.4.7   # Praat: pitch shift and 16 kHz resampling of Piper's audio

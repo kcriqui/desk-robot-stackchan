@@ -88,6 +88,32 @@ void applyGlances() {
   panNeck.setIdleGlances(on);
   tiltNeck.setIdleGlances(on);
 }
+
+// Asleep, he saves power and heat: the camera stops streaming (its frames are
+// compressed in software, the biggest load) and the screen dims. What the
+// brain asks of the camera meanwhile is remembered for when he wakes. The
+// servos already let go at rest (SERVO_AUTO_RELAX).
+bool streamWanted = false;
+float streamFps = 10.0f;
+uint8_t awakeBrightness = 0;
+
+void applyStream() {
+  camera.setStreaming(streamWanted && !face.asleep(), streamFps);
+}
+
+void setAsleep(bool on) {
+  if (on != face.asleep()) {
+    if (on) {
+      awakeBrightness = M5.Display.getBrightness();
+      M5.Display.setBrightness(max(awakeBrightness / 4, 8));
+    } else {
+      M5.Display.setBrightness(awakeBrightness);
+    }
+  }
+  face.setAsleep(on);
+  applyGlances();
+  applyStream();
+}
 uint32_t nextDemoEmotionMs = 0;
 uint8_t demoEmotionIdx = 0;
 
@@ -176,9 +202,8 @@ void handleCommand(String line) {
   } else if (cmd == "blink") {
     face.blink();
   } else if (cmd == "sleep") {
-    face.setAsleep(arg == "on");
-    applyGlances();
-    Serial.printf("sleep %s\n", face.asleep() ? "on" : "off");
+    setAsleep(arg == "on");
+    Serial.printf("sleep %s (camera %s)\n", face.asleep() ? "on" : "off", camera.streaming() ? "on" : "off");
   } else if (cmd == "speak_begin") {
     speaker.beginSpeech(static_cast<size_t>(arg.toInt()));
   } else if (cmd == "speak_end") {
@@ -208,20 +233,21 @@ void handleCommand(String line) {
   } else if (cmd == "stream") {
     int sp = arg.indexOf(' ');
     String onoff = sp < 0 ? arg : arg.substring(0, sp);
-    float fps = sp < 0 ? 10.0f : arg.substring(sp + 1).toFloat();
-    camera.setStreaming(onoff == "on", fps);
-    Serial.printf("stream %s @ %.1f fps (max %.0f)\n", camera.streaming() ? "on" : "off",
-                  min(fps, CAMERA_MAX_FPS), CAMERA_MAX_FPS);
+    streamWanted = onoff == "on";
+    streamFps = sp < 0 ? 10.0f : arg.substring(sp + 1).toFloat();
+    applyStream();  // not while asleep; it starts on waking
+    Serial.printf("stream %s @ %.1f fps (max %.0f)%s\n", camera.streaming() ? "on" : "off",
+                  min(streamFps, CAMERA_MAX_FPS), CAMERA_MAX_FPS,
+                  streamWanted && face.asleep() ? ", once he wakes" : "");
   } else if (cmd == "snap") {
     if (!camera.ok()) {
       Serial.println(F("camera not available"));
     } else {
-      bool was = camera.streaming();
       camera.setStreaming(true, CAMERA_MAX_FPS);
       static uint8_t* jpg = static_cast<uint8_t*>(ps_malloc(64 * 1024));
       size_t n = 0;
       for (int i = 0; i < 80 && n == 0 && jpg; ++i) { delay(25); n = camera.takeFrame(jpg, 64 * 1024); }
-      camera.setStreaming(was, CAMERA_MAX_FPS);
+      applyStream();  // back to what the brain wants (and off while asleep)
       Serial.printf("snap: %u bytes (%s); encode time is on the diag line\n", n, n ? "ok" : "no frame");
     }
   } else if (cmd == "temp") {
@@ -309,7 +335,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.3.0 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.3.2 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -395,6 +421,11 @@ void loop() {
   if (brainLink.connected() && now >= nextTempMs) {
     nextTempMs = now + 10000;
     brainLink.sendJson(String("{\"type\":\"temp\",\"c\":") + String(temperatureRead(), 1) + "}");
+    // The body's battery (INA226): volts, and mA (+ discharging, - charging).
+    char battery[64];
+    snprintf(battery, sizeof battery, "{\"type\":\"battery\",\"v\":%.2f,\"ma\":%.0f}",
+             M5StackChan.getBatteryVoltage(), M5StackChan.getBatteryCurrent() * 1000.0f);
+    brainLink.sendJson(battery);
   }
   if (brainLink.connected() && now >= nextStateMs) {
     nextStateMs = now + 5000;

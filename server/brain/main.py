@@ -43,9 +43,10 @@ import time
 
 import websockets
 
-from . import config, mouth, personality
+from . import alerts, battery, config, mouth, personality
+from .timers import Timers, when
 from .thinking import Interrupted, RobotBrain
-from .ears import Ears, normalize, strip_wake_word
+from .ears import Ears, is_command, normalize, strip_wake_word
 from .eyes import Eyes
 from .tracker import Tracker
 
@@ -60,6 +61,12 @@ robot_speak_done = asyncio.Event()  # robot finished playing the last reply
 eyes = Eyes()
 head_moves: asyncio.Queue[tuple[float | None, float | None, bool]] = asyncio.Queue()
 tracker: Tracker | None = None
+# One exchange at a time: a conversation turn, or something he says unasked
+# (a timer, a warning), which waits for the turn to finish.
+turn_lock = asyncio.Lock()
+camera_boost = 0  # looks in progress, which want full-rate frames
+timers = Timers()
+said_unasked: list[tuple[float, str]] = []  # (when, what) he said on his own, newest last
 
 FRAME_BYTES = 3200  # 100 ms of 16 kHz s16le per audio frame to the robot
 
@@ -155,7 +162,10 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     pick_mic_source()
     if config.MIC_SOURCE in ("auto", "robot"):
         await send_to_robot({"type": "mic", "on": True})
-    await send_to_robot({"type": "stream", "on": True, "fps": config.CAMERA_FPS})
+    await apply_camera()
+    # Agree on sleep: the robot may have kept its eyes shut (and its camera
+    # off) across a brain restart, or come back awake after a reboot.
+    await send_to_robot({"type": "asleep", "on": robot_asleep})
     # No idle head glances: they fight deliberate looks. The eyes still move.
     await send_to_robot({"type": "glance", "on": False})
     try:
@@ -187,6 +197,12 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
                     eyes.temperature = float(event.get("c"))
                 except (TypeError, ValueError):
                     pass  # not a number; leave the last reading
+                continue
+            if event.get("type") == "battery":  # every ~10 s (firmware-stackchan)
+                try:
+                    eyes.battery = battery.Reading(float(event["v"]), float(event["ma"]), time.time())
+                except (KeyError, TypeError, ValueError):
+                    pass  # malformed; leave the last reading
                 continue
             print(f"robot: {event}")
     except websockets.ConnectionClosed:
@@ -232,7 +248,8 @@ async def handle_console_line(line: str) -> bool:
         if not arg:
             print("usage: ask <question>")
             return True
-        await converse(arg)
+        async with turn_lock:
+            await converse(arg)
     elif cmd == "listen":
         if ears is None:
             await start_listening()
@@ -242,7 +259,8 @@ async def handle_console_line(line: str) -> bool:
         await mic_meter()
     elif cmd == "say":
         if arg:
-            await say(arg)
+            async with turn_lock:
+                await say(arg)
         else:
             print("usage: say <text>")
     elif cmd == "volume":
@@ -256,6 +274,32 @@ async def handle_console_line(line: str) -> bool:
 
 
 # ── Rocky's abilities (called by the brain, from its worker thread) ──────────
+
+async def apply_camera() -> None:
+    """Full-rate frames while following a face or looking around, else just
+    enough to keep the console page's picture fresh (config.CAMERA_IDLE_FPS).
+    Asleep, the robot pauses the stream itself and resumes this on waking."""
+    fast = camera_boost > 0 or (tracker is not None and tracker.enabled)
+    await send_to_robot({"type": "stream", "on": True,
+                         "fps": config.CAMERA_FPS if fast else config.CAMERA_IDLE_FPS})
+
+
+async def fresh_frame(timeout: float = 2.0) -> bytes | None:
+    """Ask for full-rate frames until a new one arrives (or `timeout`)."""
+    global camera_boost
+    seq = eyes.frame_seq
+    camera_boost += 1
+    await apply_camera()
+    try:
+        for _ in range(int(timeout / 0.1)):
+            if eyes.frame_seq != seq:
+                break
+            await asyncio.sleep(0.1)
+    finally:
+        camera_boost -= 1
+        await apply_camera()
+    return eyes.latest()
+
 
 async def look(args: dict) -> tuple[str, bytes | None]:
     """Move the head, wait for it to get there, and grab a fresh frame.
@@ -285,22 +329,29 @@ async def look(args: dict) -> tuple[str, bytes | None]:
     pan = max(-config.TRACK_PAN_LIMIT, min(config.TRACK_PAN_LIMIT, pan))
     tilt = max(config.TRACK_TILT_MIN, min(config.TRACK_TILT_MAX, tilt))
 
+    global camera_boost
     if tracker is not None and tracker.enabled:
         await set_tracking(False, announce=False)  # tracking would drag the head back
-    await set_head_held(d != "center")
-    if move_pan:
-        await send_to_robot({"type": "pan", "deg": pan})
-    if move_tilt:
-        await send_to_robot({"type": "tilt", "deg": tilt})
-    if tracker is not None:
-        tracker.note_pose(pan=pan if move_pan else None, tilt=tilt if move_tilt else None)
-    await asyncio.sleep(1.2)  # servo easing + a frame or two from the new angle
-    seq = eyes.frame_seq
-    for _ in range(10):
-        if eyes.frame_seq != seq:
-            break
-        await asyncio.sleep(0.1)
-    jpeg = eyes.latest()
+    camera_boost += 1  # full rate, so a frame from the new angle comes quickly
+    await apply_camera()
+    try:
+        await set_head_held(d != "center")
+        if move_pan:
+            await send_to_robot({"type": "pan", "deg": pan})
+        if move_tilt:
+            await send_to_robot({"type": "tilt", "deg": tilt})
+        if tracker is not None:
+            tracker.note_pose(pan=pan if move_pan else None, tilt=tilt if move_tilt else None)
+        await asyncio.sleep(1.2)  # servo easing + a frame or two from the new angle
+        seq = eyes.frame_seq
+        for _ in range(10):
+            if eyes.frame_seq != seq:
+                break
+            await asyncio.sleep(0.1)
+        jpeg = eyes.latest()
+    finally:
+        camera_boost -= 1
+        await apply_camera()
     pan_word = "left" if pan < -5 else "right" if pan > 5 else "center"
     # Level (0) is one end of the travel: the top for a neck that nods down,
     # the bottom for one that looks up.
@@ -346,10 +397,62 @@ async def set_asleep(on: bool) -> None:
 def situation() -> str:
     """His current state, told to the model with every question."""
     if tracker is None:
-        return "You have no face tracker running right now."
-    if tracker.enabled:
-        return "Right now you ARE following your human's face with your head (track_face is on)."
-    return "Right now you are NOT following your human's face (track_face is off)."
+        state = "You have no face tracker running right now."
+    elif tracker.enabled:
+        state = "Right now you ARE following your human's face with your head (track_face is on)."
+    else:
+        state = "Right now you are NOT following your human's face (track_face is off)."
+    now = time.time()
+    state = time.strftime("It is now %A %d %B, %H:%M. ", time.localtime(now)) + state
+    pending = timers.pending()
+    if pending:
+        state += " Timers set: " + "; ".join(
+            f"{t.about or 'a timer'} rings {when(t.due, now)}" for t in pending) + "."
+    recent = [text for at, text in said_unasked if now - at < 600]
+    if recent:
+        state += " On your own, a few minutes ago, you said: " + " / ".join(f'"{t}"' for t in recent[-3:])
+    b = eyes.battery
+    if b is not None and b.low() and now - b.at < 60:
+        state += (f" Your battery is LOW (about {b.percent}%, roughly {b.minutes_left()} minutes left): "
+                  "mention it and ask to be plugged in.")
+    if eyes.temperature is not None and eyes.temperature >= config.TEMP_WARN_C:
+        state += f" Your chip is hot ({eyes.temperature:.0f} C)."
+    return state
+
+
+def check_temperature(args: dict) -> tuple[str, bytes | None]:
+    c = eyes.temperature
+    if c is None:
+        return ("No temperature reading yet: your body hasn't reported one.", None)
+    verdict = ("too hot" if c >= config.TEMP_WARN_C + 5 else "hot" if c >= config.TEMP_WARN_C
+               else "warm but fine" if c >= config.TEMP_WARN_C - 15 else "cool")
+    return (f"The chip inside your head is at {c:.1f} C: {verdict} (you warn your human from "
+            f"{config.TEMP_WARN_C:.0f} C). It's your own temperature, not the room's; you have no "
+            "room thermometer.", None)
+
+
+def set_timer(args: dict) -> tuple[str, bytes | None]:
+    try:
+        t = timers.add(float(args.get("minutes", 0)), str(args.get("about") or ""))
+    except (TypeError, ValueError) as e:
+        return (f"Timer not set: {e}.", None)
+    print(f"  (timer: {t.about or 'no label'} rings {when(t.due)})")
+    return (f"Timer set: {t.about or 'no label'}, rings {when(t.due)}. You will announce it yourself.", None)
+
+
+def cancel_timer(args: dict) -> tuple[str, bytes | None]:
+    gone = timers.cancel(str(args.get("about") or ""))
+    if not gone:
+        left = timers.pending()
+        return ("No timer matched. " + ("Timers set: " + "; ".join(t.about or "a timer" for t in left)
+                                         if left else "No timers are set."), None)
+    return ("Cancelled: " + "; ".join(t.about or "a timer" for t in gone) + ".", None)
+
+
+def check_battery(args: dict) -> tuple[str, bytes | None]:
+    if eyes.battery is None:
+        return ("No battery reading yet: your body hasn't reported one.", None)
+    return (eyes.battery.describe(), None)
 
 
 async def set_tracking(on: bool, announce: bool = True) -> tuple[str, bytes | None]:
@@ -361,6 +464,7 @@ async def set_tracking(on: bool, announce: bool = True) -> tuple[str, bytes | No
     if not on and tracker.tracking:
         tracker.tracking = False
         eyes.tracking_info = {"tracking": False, "pan": tracker.pan, "tilt": tracker.tilt}
+    await apply_camera()  # full rate only while following
     if announce:
         print(f"tracking {'on' if on else 'off'}")
     return ("now following the human's face" if on else "stopped following", None)
@@ -378,6 +482,9 @@ ABILITIES = {
     "look": _sync(look),
     "track_face": _sync(lambda args: set_tracking(bool(args.get("on", True)))),
 }
+ABILITIES.update(check_temperature=check_temperature, set_timer=set_timer, cancel_timer=cancel_timer)
+if config.BODY == "stackchan":  # the original body has no battery sensor
+    ABILITIES["check_battery"] = check_battery
 
 
 def wants_camera(question: str) -> bool:
@@ -581,6 +688,8 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
     camera_wanted = config.SEND_CAMERA_TO_BRAIN and wants_camera(question)
     jpeg = eyes.latest() if camera_wanted else None
     if camera_wanted and jpeg is None:
+        jpeg = await fresh_frame()  # e.g. just woken: the camera was paused
+    if camera_wanted and jpeg is None:
         print("  (camera has no fresh frame — telling him he can't see right now)")
     reply = SpokenReply(loop, tl)
     reply.think_and_speak(question, jpeg, camera_wanted)
@@ -735,7 +844,11 @@ async def _console_command(action: str, payload: dict) -> dict:
         if not text or len(text) > 300:
             raise ValueError("text must be 1 to 300 characters")
         print(f"console: {action} {text}")
-        asyncio.create_task(say(text) if action == "say" else converse(text))
+
+        async def run() -> None:
+            async with turn_lock:  # not over a conversation or an announcement
+                await (say(text) if action == "say" else converse(text))
+        asyncio.create_task(run())
     elif action == "tune":
         key = payload.get("key")
         if key not in TUNABLE:
@@ -788,6 +901,7 @@ async def mic_meter() -> None:
 async def start_listening() -> None:
     global ears
     loop = asyncio.get_running_loop()
+    print(await loop.run_in_executor(None, mouth.prepare))
     print(f"loading speech model {config.STT_MODEL} and the turn-taking models (first run downloads them)...")
     try:
         ears = await loop.run_in_executor(
@@ -870,6 +984,55 @@ async def _next_heard() -> tuple[str, float, float, float] | None:
                 return None
 
 
+async def announce(key: str, emotion: str, **values) -> None:
+    """Speak up unasked: a timer ringing, a low battery, a hot chip. Waits for
+    any conversation turn to finish, opens his eyes to say it, and leaves him
+    awake so you can answer without the wake word."""
+    global awake_until
+    text = personality.LINES[key].format(**values)
+    if robot_socket is None:
+        print(f"(robot not connected; {config.ROBOT_NAME} would have said: {text})")
+        return
+    async with turn_lock:
+        print(f"{config.ROBOT_NAME} [{emotion}] (unasked): {text}")
+        if robot_asleep:
+            await set_asleep(False)
+        await send_to_robot({"type": "emotion", "name": emotion})
+        await say(text)
+        eyes.last_said = text
+        said_unasked.append((time.time(), text))
+        del said_unasked[:-5]
+        awake_until = time.time() + config.AWAKE_SECONDS
+
+
+# What he says unasked, and with which face: personality.LINES has the words.
+_ALERT_EMOTIONS = {
+    "battery_low": "thinking", "battery_very_low": "sad", "battery_critical": "surprised",
+    "battery_saved": "happy", "hot": "thinking", "very_hot": "sad",
+}
+
+
+async def watch_loop() -> None:
+    """Every second: ring due timers, and warn about the battery and the
+    chip's temperature (alerts.py decides when)."""
+    battery_watch, temp_watch = alerts.BatteryWatch(), alerts.TempWatch()
+    while True:
+        await asyncio.sleep(1)
+        try:
+            for t in timers.due():
+                await announce("timer" if t.about else "timer_plain", "surprised", about=t.about)
+            now = time.time()
+            key = battery_watch.check(eyes.battery, now)
+            if key:
+                b = eyes.battery
+                await announce(key, _ALERT_EMOTIONS[key], percent=b.percent, minutes=b.minutes_left() or 0)
+            key = temp_watch.check(eyes.temperature, now)
+            if key:
+                await announce(key, _ALERT_EMOTIONS[key], temp=round(eyes.temperature))
+        except Exception as e:  # a bad reading or a speaker hiccup mustn't stop the watch
+            print(f"(watch loop: {e})")
+
+
 async def voice_loop() -> None:
     """Turns what the ears hear into conversations. A bug in one turn must
     not kill the loop (then nothing you say would get through), so each turn
@@ -877,7 +1040,8 @@ async def voice_loop() -> None:
     while True:
         item = await heard.get()
         try:
-            await _handle_heard(item)
+            async with turn_lock:
+                await _handle_heard(item)
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -902,19 +1066,21 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
         await set_asleep(False)
     norm = normalize(text)
     lines = personality.LINES
-    if any(p in norm for p in config.TRACK_ON_PHRASES) and not any(p in norm for p in config.TRACK_OFF_PHRASES):
+    # Shortcuts, answered without asking the model, only when the phrase is
+    # (nearly) all that was said. Anything else goes to the model as usual.
+    if is_command(norm, config.TRACK_ON_PHRASES) and not is_command(norm, config.TRACK_OFF_PHRASES):
         await set_tracking(True)
         print(f"{config.ROBOT_NAME} [happy]: {lines['track_on']}")
         await send_to_robot({"type": "emotion", "name": "happy"})
         await say(lines["track_on"])
         return
-    if any(p in norm for p in config.TRACK_OFF_PHRASES):
+    if is_command(norm, config.TRACK_OFF_PHRASES):
         await set_tracking(False)
         print(f"{config.ROBOT_NAME} [neutral]: {lines['track_off']}")
         await send_to_robot({"type": "emotion", "name": "neutral"})
         await say(lines["track_off"])
         return
-    if any(p in norm for p in config.SLEEP_PHRASES):
+    if is_command(norm, config.SLEEP_PHRASES):
         # "Rocky, sleep": goodnight line, sleepy face, and only "hey Rocky"
         # wakes him. No brain call.
         awake_until = 0.0
@@ -990,6 +1156,7 @@ async def main() -> None:
         voice_task = asyncio.create_task(voice_loop())
         doze_task = asyncio.create_task(doze_loop())
         head_task = asyncio.create_task(head_loop())
+        watch_task = asyncio.create_task(watch_loop())
         if config.LISTEN_ON_START:
             await start_listening()
         try:
@@ -998,6 +1165,7 @@ async def main() -> None:
             voice_task.cancel()
             doze_task.cancel()
             head_task.cancel()
+            watch_task.cancel()
             if ears is not None:
                 stop_listening()
 

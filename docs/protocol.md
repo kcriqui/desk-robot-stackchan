@@ -10,9 +10,10 @@ The rest of the frame is the payload.
 ## Robot → server
 
 ```json
-{"type": "hello", "who": "desk-robot", "fw": "0.3.0", "token": "..."}  // must be the first message; token = ROBOT_TOKEN
+{"type": "hello", "who": "desk-robot", "fw": "0.3.2", "token": "..."}  // must be the first message; token = ROBOT_TOKEN
 {"type": "state", "pan": 12.5, "emotion": "neutral"}
 {"type": "temp", "c": 52.0}       // chip temperature, sent every ~10 s
+{"type": "battery", "v": 3.92, "ma": 410}  // firmware-stackchan: battery volts and mA (+ discharging, - charging), every ~10 s
 {"type": "speak_done"}            // finished playing the last reply
 ```
 
@@ -39,7 +40,9 @@ settle. The server takes either type.
 {"type": "speak_begin", "bytes": 0}      // binary TTS audio frames follow; bytes = total if known, 0 = streaming (robot starts after 200 ms of audio)
 {"type": "speak_end"}             // no more audio; robot replies speak_done when played out
 {"type": "volume", "level": 0.4}  // speaker volume 0.0-1.0
-{"type": "asleep", "on": true}    // eyes shut + Z's; false = wake up. Asleep = no idle glances.
+{"type": "asleep", "on": true}    // eyes shut + Z's; false = wake up. Asleep = no idle glances;
+                                  // firmware-stackchan also pauses the camera stream and dims the screen
+                                  // (sent on connect too, so both sides agree)
 {"type": "glance", "on": false}   // allow/forbid the firmware's idle head glances; the server sends off on connect and leaves them off
 {"type": "mic", "on": true}       // stream the microphone to the server
 {"type": "stream", "on": true, "fps": 10}   // start/stop the camera stream, set rate

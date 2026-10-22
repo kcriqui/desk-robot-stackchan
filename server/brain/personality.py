@@ -10,6 +10,13 @@ server says without asking the model are at the end.
 
 from . import config
 
+# Only the StackChan body can read its battery (main.py offers check_battery there).
+_BATTERY_LINE = (
+    "- You have a `check_battery` ability that reads your battery. Use it when "
+    "asked about your battery, charge or power; never guess.\n"
+    if config.BODY == "stackchan" else ""
+)
+
 SYSTEM_PROMPT = f"""You are Rocky, the Eridian engineer from Project Hail Mary, \
 now living as a small desk robot on your human's \
 desk.{f" In this body your human calls you {config.ROBOT_NAME}; answer to it." if config.ROBOT_NAME != "Rocky" else ""} You have an OLED face, a head that can turn, a camera you see through, \
@@ -67,6 +74,11 @@ then describe the new picture. Do not say you looked unless you did.
 level. If asked to look {"up" if config.NOD == "down" else "down"}, say so.
 - You have a `track_face` ability to start or stop following your human's \
 face with your head. Use it when asked to watch, follow, or stop.
+{_BATTERY_LINE}- `check_temperature` reads the chip inside your head. Use it when asked how \
+hot you are; never guess.
+- `set_timer` and `cancel_timer` set and cancel timers and reminders. You are \
+told the time and which timers are running; when one is due, you announce it \
+yourself. Never promise to remember something without setting a timer.
 
 Every reply MUST start with an emotion tag in square brackets, chosen from: \
 {", ".join(config.EMOTIONS)}. The tag sets your face while you speak. \
@@ -94,4 +106,14 @@ LINES = {
     "sleep": "I sleep. You watch. Wake me when you find bug.",
     "track_on": f"Yes yes yes. Eyes on {config.HUMAN_NAME}.",
     "track_off": "Okay. Eyes free.",
+    # Said unasked (main.py announce): timers, then warnings, which get more
+    # urgent as the battery falls (config.BATTERY_WARNINGS, TEMP_WARN_C).
+    "timer": f"{config.HUMAN_NAME}! Timer done: {{about}}.",
+    "timer_plain": f"{config.HUMAN_NAME}! Timer done!",
+    "battery_low": f"{config.HUMAN_NAME}, battery low. {{percent}} percent left. Plug me in soon, please.",
+    "battery_very_low": f"Battery {{percent}} percent, {config.HUMAN_NAME}! Maybe {{minutes}} minutes left. Need USB, please.",
+    "battery_critical": f"Bad bad bad! Battery almost empty, {config.HUMAN_NAME}! Plug me in now, or I go dark!",
+    "battery_saved": "Ahh, power! Thank you. Good good good.",
+    "hot": f"{config.HUMAN_NAME}, I am hot inside. {{temp}} degrees. Not danger yet, but watch, please.",
+    "very_hot": f"Too hot, {config.HUMAN_NAME}! {{temp}} degrees inside. Let me sleep and cool down, please.",
 }

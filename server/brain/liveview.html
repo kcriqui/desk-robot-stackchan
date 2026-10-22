@@ -53,6 +53,7 @@
   h1 .dot.on { background: var(--amber); box-shadow: 0 0 12px var(--amber); }
   .vitals { list-style: none; margin: 0; padding: 0; display: flex; gap: 26px; flex-wrap: wrap; }
   .vitals li { display: flex; flex-direction: column; gap: 3px; min-width: 64px; }
+  .vitals li[hidden] { display: none; }
   .vitals .k { font: 10px var(--display); letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }
   .vitals .v { font: 500 14px var(--mono); color: var(--ink); }
   .vitals .v.warn { color: var(--astro); }
@@ -152,6 +153,7 @@
       <li><span class="k">Link</span><span class="v" id="link">—</span></li>
       <li><span class="k">Camera</span><span class="v" id="fps">—</span></li>
       <li><span class="k">Hull</span><span class="v" id="temp">—</span></li>
+      <li id="powerrow" hidden><span class="k">Power</span><span class="v" id="power">—</span></li>
       <li><span class="k">State</span><span class="v" id="state">—</span></li>
       <li><span class="k">Ears</span><span class="v" id="mic">—</span></li>
     </ul>
@@ -344,6 +346,9 @@
       $("fps").className = "v" + (s.frame_age_s != null && s.frame_age_s < 3 ? "" : " warn");
       $("temp").textContent = s.temperature_c != null ? s.temperature_c.toFixed(1) + " °C" : "—";
       $("temp").className = "v" + (s.temperature_c > 70 ? " warn" : "");
+      $("powerrow").hidden = !s.battery;  // only a StackChan reports one
+      $("power").textContent = s.battery || "—";
+      $("power").className = "v" + (s.battery_low ? " warn" : "");
       $("state").textContent = s.speaking ? "speaking" : s.thinking ? "thinking" : s.awake ? "awake" : "asleep";
       $("mic").textContent = s.listening ? (s.mic === "robot" ? "robot mic" : "Mac mic") : "off";
       $("awakenote").textContent = s.awake ? "dozes off in " + Math.max(0, Math.round(s.awake_for)) + " s" : "asleep · say hey " + NAME;

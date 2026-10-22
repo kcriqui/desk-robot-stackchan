@@ -96,9 +96,10 @@ one. Everything is a common Amazon or Adafruit item.
   - **OpenRouter** (the default): one key, any model, easy to switch.
   - **Anthropic**: use a Claude model directly.
   - **OpenAI**: use a GPT model directly.
-- Optionally a **Fish Audio** key for the cloned voice. Without it Rocky
-  speaks with your computer's built-in voice, which is fine for getting
-  started.
+- Optionally a **Fish Audio** key for the cloned voice, or the free
+  **Piper** voice that runs on your computer (see
+  [Change the voice](#change-the-voice)). Without either, Rocky speaks with
+  your computer's built-in voice, which is fine for getting started.
 
 **Skills.** Basic soldering (about 27 joints, all through-hole), and the
 patience to read the wiring guide before powering anything on.
@@ -299,7 +300,25 @@ disappear one day, and it is for personal use. Open any voice's page there,
 copy the 32-character ID from the URL into `TTS_VOICE_ID` in `config.py`,
 and put your Fish key in `server/.env`.
 `TTS_TEMPERATURE` and `TTS_TOP_P` trade steadiness for expressiveness.
-Without a Fish key he uses the computer's built-in voice: on macOS,
+
+Without a Fish key he can use [Piper](https://github.com/OHF-Voice/piper1-gpl),
+a free voice that runs on your computer in well under a tenth of a second per
+sentence. It's optional because it's GPL-3.0 licensed (this project is MIT):
+
+```bash
+cd server && pip install -r requirements-piper.txt
+```
+
+The brain then picks it up on its next start and prints `voice: Piper ...`.
+The voice file (~60 MB) downloads once, pinned and hash-checked. Two voices
+are set up in `PIPER_VOICES` in `config.py`, each with its own pitch and
+speed: `en_US-ryan-medium` (the default) and `en_US-hfc_male-medium`.
+`PIPER_VOICE` in `server/.env` switches between them, and `TTS_ENGINE`
+forces a voice (`fish`, `piper` or `builtin`) when more than one is set up.
+Both voices were trained on recordings licensed for non-commercial use
+only (CC BY-NC-SA 4.0).
+
+Without Fish or Piper he uses the computer's built-in voice: on macOS,
 `TTS_FALLBACK_VOICE` picks one (`say -v ?` lists them); Windows uses its
 default voice; Linux uses `espeak-ng` if installed.
 
@@ -391,7 +410,7 @@ different panel. The expressions themselves are drawn in `face.cpp`.
   (`turn.py`) to decide when you have finished. `thinking.py` talks to the
   model, streams the reply sentence by sentence, and gives the model two
   tools: `look` (move the head, take a picture) and `track_face`.
-  `mouth.py` turns text into audio with Fish Audio and levels it for the
+  `mouth.py` turns text into audio with Fish Audio or Piper and levels it for the
   small speaker. `tracker.py` follows faces with OpenCV. `eyes.py` serves
   the console page. `main.py` ties it together.
 - **Protocol** between the two is in [`docs/protocol.md`](docs/protocol.md):
@@ -400,7 +419,7 @@ different panel. The expressions themselves are drawn in `face.cpp`.
 Tests run with no hardware and no downloads:
 
 ```bash
-cd server && python -m unittest tests/test_personality.py tests/test_segmenter.py
+cd server && python -m unittest tests/test_personality.py tests/test_segmenter.py tests/test_voice.py tests/test_battery.py tests/test_alerts.py
 ```
 
 ## Privacy and security
@@ -444,6 +463,13 @@ cd server && python -m unittest tests/test_personality.py tests/test_segmenter.p
   Both download on first run. `server/brain/whisper_features.py` is
   vendored from Smart Turn (Daily, BSD-2-Clause), itself derived from
   HuggingFace transformers (Apache 2.0).
+- The optional local voice is [Piper](https://github.com/OHF-Voice/piper1-gpl)
+  (GPL-3.0) with [Parselmouth](https://github.com/YannickJadoul/Parselmouth),
+  Python bindings for [Praat](https://www.fon.hum.uva.nl/praat/) (GPL-3.0).
+  Neither ships with this project: `server/requirements-piper.txt` installs
+  them only if you want them. The Piper voices download on first use from
+  [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices); the two set up here were
+  trained on CC BY-NC-SA 4.0 recordings (non-commercial use only).
 - Rocky and his voice are fan work. *Project Hail Mary* belongs to Andy Weir.
 
 MIT licensed. See [`LICENSE`](LICENSE). Build one, change everything, tell

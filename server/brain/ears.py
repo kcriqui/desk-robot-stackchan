@@ -222,6 +222,42 @@ def normalize(text: str) -> str:
     return " ".join(_WAKE_CLEAN.sub(" ", text.lower()).split())
 
 
+# Words that can surround a spoken command without turning it into a
+# sentence about something else ("okay RockyChan, go to sleep now").
+_FILLER = {"hey", "hi", "ok", "okay", "now", "please", "so", "then", "alright", "and", "just", "thanks"}
+
+
+def _without_names(norm: str) -> str:
+    padded = f" {norm} "
+    for name in config.NAMES:  # longest first, so "rocky chan" goes before "rocky"
+        padded = padded.replace(f" {name} ", " ")
+    return " ".join(padded.split())
+
+
+def is_command(norm: str, phrases: list[str], extra: int = 2) -> bool:
+    """Is one of `phrases` (nearly) all that was said? `norm` is normalize()d.
+    His names and filler words don't count; a few other words may (`extra`,
+    fewer for short phrases: "sleep" must be alone). A phrase with his name
+    in it needs his name said. "RockyChan, go to sleep now" is a command;
+    "I'll work some more before I go to sleep" isn't (a phrase anywhere used
+    to count, and put him to sleep)."""
+    text = _without_names(norm)
+    named = text != norm
+    padded = f" {text} "
+    for phrase in phrases:
+        p = _without_names(phrase)
+        if not p or (p != phrase and not named):
+            continue
+        i = padded.find(f" {p} ")
+        if i < 0:
+            continue
+        rest = (padded[:i] + " " + padded[i + len(p) + 2:]).split()
+        allowed = min(extra, len(p.split()) - 1)
+        if len([w for w in rest if w not in _FILLER]) <= allowed:
+            return True
+    return False
+
+
 def _wake_pattern() -> re.Pattern:
     # "hey rocky" -> matches "Hey, Rocky!" etc.: any punctuation/space between
     # the words, case-insensitive, and swallows the punctuation after it.
