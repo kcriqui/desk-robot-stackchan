@@ -21,5 +21,19 @@ class SttTests(unittest.TestCase):
                 self.assertRegex(sha, r"^[0-9a-f]{64}$")
 
 
+class CollapseRepeatsTests(unittest.TestCase):
+    def test_a_run_on_utterance_is_said_once(self):
+        c = moonshine.collapse_repeats
+        self.assertEqual(c("Go to sleep go to sleep"), "Go to sleep")
+        self.assertEqual(c("Stop here stop here stop here stop here"), "Stop here")
+        self.assertEqual(c("Go to sleep. Go to sleep."), "Go to sleep.")
+
+    def test_real_repeats_are_kept(self):
+        c = moonshine.collapse_repeats
+        for text in ("Rocky rocky rocky rocky", "Happy happy happy", "What time is it?",
+                     "One, two, three, four, five."):
+            self.assertEqual(c(text), text)
+
+
 if __name__ == "__main__":
     unittest.main()
