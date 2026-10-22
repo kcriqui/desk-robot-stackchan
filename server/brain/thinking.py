@@ -57,20 +57,24 @@ TOOLS = [
         "function": {
             "name": "look",
             "description": (
-                "Move your head to look somewhere. Use it whenever you are asked to "
-                "look left/right/down/up/around, or need to see something outside "
-                "the current picture. Always call it when asked, even if you think "
-                "you are already there: the result tells you where your head really "
-                "is and whether it is at a limit. You get a fresh camera image "
-                f"afterwards; describe only what that image shows. {_NECK_LIMIT}"
+                "Get a fresh camera picture, moving your head first if asked. Use "
+                "direction \"here\" (no movement) when your human is showing you "
+                "something or you just need a newer picture: they are usually "
+                "already in front of you. Use left/right/down/up/around when asked "
+                "to look somewhere, or to see something outside the current picture; "
+                "always call it when asked, even if you think you are already there: "
+                "the result tells you where your head really is and whether it is at "
+                "a limit. Describe only what the fresh image shows. "
+                f"{_NECK_LIMIT}"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "direction": {
                         "type": "string",
-                        "enum": ["left", "right", _NOD, "level", "center"],
+                        "enum": ["here", "left", "right", _NOD, "level", "center"],
                         "description": (
+                            "here = don't move, just a fresh picture; "
                             f"left/right turn the head only (no nod); {_NOD}/level nod only (no turn); "
                             f"center = {_CENTER}"
                         ),

@@ -311,8 +311,11 @@ CAMERA_WORDS = [
     "holding", "wearing", "what color", "what colour", "what am i", "who is",
     "who's", "how many", "in front of you", "behind you", "on my desk", "on the desk",
     "in the room", "whiteboard", "on the screen", "on my screen", "read this", "read that",
-    "read the", "read what",
+    "read the", "read what", "show", "showing", "this one", "that one", "which one",
 ]
+# For this long after a question that used the camera (a picture attached,
+# or a `look`), the next question gets a picture too: "how about this one?"
+CAMERA_FOLLOWUP_SECONDS = 60.0
 
 # Face tracking: the head follows the biggest face in the picture.
 # Off until you ask ("Rocky, track me"); phrases below switch it without a

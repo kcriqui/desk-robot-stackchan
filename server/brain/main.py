@@ -70,6 +70,7 @@ tracker: Tracker | None = None
 # (a timer, a warning), which waits for the turn to finish.
 turn_lock = asyncio.Lock()
 camera_boost = 0  # looks in progress, which want full-rate frames
+last_visual_at = 0.0  # when a question last came with a picture, or he last used `look`
 timers = Timers()
 said_unasked: list[tuple[float, str]] = []  # (when, what) he said on his own, newest last
 
@@ -328,7 +329,14 @@ async def fresh_frame(timeout: float = 2.0) -> bytes | None:
 async def look(args: dict) -> tuple[str, bytes | None]:
     """Move the head, wait for it to get there, and grab a fresh frame.
     Only the axis that was asked for moves: "left"/"right" pan, "down"/"up"/
-    "level" tilt (whichever this body's neck can do), "center" both."""
+    "level" tilt (whichever this body's neck can do), "center" both, "here"
+    neither (just a fresh picture, e.g. of something being shown to him)."""
+    global last_visual_at
+    last_visual_at = time.time()
+    if args.get("direction") == "here":
+        jpeg = await fresh_frame()
+        return (("Head didn't move. Fresh camera image attached." if jpeg
+                 else "Head didn't move. No camera image available."), jpeg)
     pan = tracker.pan if tracker else 0.0
     tilt = tracker.tilt if tracker else 0.0
     move_pan = move_tilt = False
@@ -349,7 +357,7 @@ async def look(args: dict) -> tuple[str, bytes | None]:
     elif d == "center":
         pan, tilt, move_pan, move_tilt = 0.0, config.TILT_REST, True, True
     if not (move_pan or move_tilt):
-        return (f"Say where to look: left, right, {config.NOD}, level, or center.", None)
+        return (f"Say where to look: here, left, right, {config.NOD}, level, or center.", None)
     pan = max(-config.TRACK_PAN_LIMIT, min(config.TRACK_PAN_LIMIT, pan))
     tilt = max(config.TRACK_TILT_MIN, min(config.TRACK_TILT_MAX, tilt))
 
@@ -709,7 +717,13 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
         tl.marks["heard"] = heard_at
     speech_started.clear()
     await send_to_robot({"type": "emotion", "name": "thinking"})
-    camera_wanted = config.SEND_CAMERA_TO_BRAIN and wants_camera(question)
+    global last_visual_at
+    # A follow-up to something visual ("how about this one?") gets a picture
+    # too, though it has no camera words in it.
+    followup = time.time() - last_visual_at < config.CAMERA_FOLLOWUP_SECONDS
+    camera_wanted = config.SEND_CAMERA_TO_BRAIN and (wants_camera(question) or followup)
+    if camera_wanted:
+        last_visual_at = time.time()
     jpeg = eyes.latest() if camera_wanted else None
     if camera_wanted and jpeg is None:
         jpeg = await fresh_frame()  # e.g. just woken: the camera was paused
