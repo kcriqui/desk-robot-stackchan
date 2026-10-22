@@ -6,7 +6,7 @@ stream) or the robot's PDM mic, whose frames arrive over the WebSocket and
 are handed in through push_audio(). `source` picks which one is live.
 
 Pipeline:  mic blocks → Segmenter (Silero VAD + Smart Turn, see turn.py) →
-Transcriber (faster-whisper, local, no cloud) → on_utterance(text, ...)
+Transcriber (faster-whisper or Moonshine, local, no cloud) → on_utterance(text, ...)
 
 Where a turn ends is decided the way people do it, not by a fixed silence:
 a 0.2 s pause makes the Smart Turn model listen to the whole sentence and
@@ -215,6 +215,14 @@ class Transcriber:
         return " ".join(s.text.strip() for s in segments).strip()
 
 
+def make_transcriber(engine: str):
+    """The speech-to-text engine (config.STT_ENGINE): whisper or moonshine."""
+    if engine == "moonshine":
+        from .moonshine import MoonshineTranscriber
+        return MoonshineTranscriber()
+    return Transcriber()
+
+
 _WAKE_CLEAN = re.compile(r"[^a-z' ]+")
 
 
@@ -325,8 +333,15 @@ class Ears:
         self._stream = None
         self._worker: threading.Thread | None = None
         self._highpass = HighPass()
-        self._segmenter = Segmenter(SileroVAD(), SmartTurn(), on_speech_start)
-        self.transcriber = Transcriber()
+        self._segmenter = Segmenter(SileroVAD(), SmartTurn(config.TURN_THREADS), on_speech_start)
+        self.transcriber = make_transcriber(config.STT_ENGINE)
+        # DEBUG_STT_COMPARE: the other engine hears each utterance too, on its
+        # own thread after this one has passed it on, so replies aren't delayed.
+        self._compare: tuple[str, object, queue.Queue] | None = None
+        if config.DEBUG_STT_COMPARE:
+            other = "whisper" if config.STT_ENGINE == "moonshine" else "moonshine"
+            self._compare = (other, make_transcriber(other), queue.Queue(maxsize=1))
+            threading.Thread(target=self._run_compare, daemon=True).start()
 
     def set_source(self, source: str) -> None:
         """Switch between the Mac mic and the robot mic."""
@@ -428,6 +443,21 @@ class Ears:
                 _save_wav(utterance, config.DEBUG_SAVE_UTTERANCE)
             t0 = time.time()
             text = self.transcriber.transcribe(utterance)
-            print(f"  (turn: {segmenter.last_decision}; transcribed in {time.time() - t0:.2f}s)")
+            print(f"  (turn: {segmenter.last_decision}; {config.STT_ENGINE} transcribed in {time.time() - t0:.2f}s)")
             if text:
                 self.on_utterance(text, segmenter.started_at, segmenter.ended_at)
+            if self._compare is not None:
+                try:
+                    self._compare[2].put_nowait((utterance, text))
+                except queue.Full:
+                    pass  # still busy with the last one; skip this one
+
+    def _run_compare(self) -> None:
+        name, transcriber, todo = self._compare
+        while True:
+            audio, primary = todo.get()
+            t0 = time.time()
+            other = transcriber.transcribe(audio)
+            same = normalize(other) == normalize(primary)
+            print(f"  (compare: {config.STT_ENGINE} {primary!r} | {name} {time.time() - t0:.2f}s {other!r}"
+                  f"{'  same' if same else '  DIFFERENT'})")

@@ -188,6 +188,24 @@ WAKE_PHRASES = list(dict.fromkeys(WAKE_PHRASES))
 # On for the StackChan: its mic is quieter, and the soft "hey" often doesn't
 # make it into the transcript.
 WAKE_ON_NAME = BODY == "stackchan"
+# Speech-to-text engine. STT_ENGINE in server/.env:
+#   whisper    faster-whisper (STT_MODEL below), the default. It's told his
+#              name (STT_PROMPT), which helps it hear "Rocky".
+#   moonshine  Moonshine (brain/moonshine.py, MOONSHINE_MODEL tiny or base):
+#              7-10x faster on short questions, since Whisper always works
+#              through a 30 s window. Worth it on a slow CPU. It can't be
+#              told his name.
+# DEBUG_STT_COMPARE=1 in server/.env also runs the other engine on each
+# utterance (after the reply has started) and prints both transcripts, to
+# judge Moonshine on your own voice before switching. It costs CPU time.
+STT_ENGINE = os.environ.get("STT_ENGINE", "whisper").strip().lower()
+if STT_ENGINE not in ("whisper", "moonshine"):
+    raise SystemExit(f"STT_ENGINE={STT_ENGINE!r} in server/.env: use whisper or moonshine")
+MOONSHINE_MODEL = os.environ.get("MOONSHINE_MODEL", "base").strip().lower()
+DEBUG_STT_COMPARE = os.environ.get("DEBUG_STT_COMPARE", "") not in ("", "0")
+# Threads for the end-of-turn model (Smart Turn). 2 is plenty on a fast
+# CPU; on the NAS's 4 cores, 4 took it from ~160 to ~110 ms.
+TURN_THREADS = int(os.environ.get("TURN_THREADS", "2"))
 STT_MODEL = "base.en"   # faster-whisper model: base.en ~0.3 s per utterance on an Apple
                          # Silicon Mac, small.en hears a little better but takes ~1 s
 # The Hugging Face commit of that model to download (Systran/faster-whisper-<STT_MODEL>).

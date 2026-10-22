@@ -902,7 +902,8 @@ async def start_listening() -> None:
     global ears
     loop = asyncio.get_running_loop()
     print(await loop.run_in_executor(None, mouth.prepare))
-    print(f"loading speech model {config.STT_MODEL} and the turn-taking models (first run downloads them)...")
+    stt = f"Moonshine {config.MOONSHINE_MODEL}" if config.STT_ENGINE == "moonshine" else config.STT_MODEL
+    print(f"loading speech model {stt} and the turn-taking models (first run downloads them)...")
     try:
         ears = await loop.run_in_executor(
             None,

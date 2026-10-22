@@ -362,6 +362,16 @@ better and takes about a second longer), and `MIC_DEVICE` in `.env` if the
 computer should use a specific microphone. The console page has sliders for the
 listening knobs; changes apply immediately and last until restart.
 
+On a slow computer, `STT_ENGINE=moonshine` in `server/.env` swaps Whisper
+for [Moonshine](https://github.com/moonshine-ai/moonshine). Whisper always
+works through a 30-second window, so a short question costs as much as a
+long one; Moonshine's work grows with what you said. On a 2011 quad-core
+it transcribed "Rocky, what time is it?" in 0.28 s instead of 1.85 s.
+Unlike Whisper it can't be told his name, so try it on your own voice
+first: `DEBUG_STT_COMPARE=1` runs both engines on everything you say and
+prints the two transcripts side by side. `MOONSHINE_MODEL=tiny` is faster
+still and a little less accurate than the default `base`.
+
 ### Change the body
 
 `firmware/include/config.h` has the pin map, the head's range and speed
@@ -419,7 +429,7 @@ different panel. The expressions themselves are drawn in `face.cpp`.
 Tests run with no hardware and no downloads:
 
 ```bash
-cd server && python -m unittest tests/test_personality.py tests/test_segmenter.py tests/test_voice.py tests/test_battery.py tests/test_alerts.py
+cd server && python -m unittest tests/test_personality.py tests/test_segmenter.py tests/test_voice.py tests/test_battery.py tests/test_alerts.py tests/test_stt.py
 ```
 
 ## Privacy and security
@@ -463,6 +473,10 @@ cd server && python -m unittest tests/test_personality.py tests/test_segmenter.p
   Both download on first run. `server/brain/whisper_features.py` is
   vendored from Smart Turn (Daily, BSD-2-Clause), itself derived from
   HuggingFace transformers (Apache 2.0).
+- The optional speech-to-text engine is
+  [Moonshine](https://github.com/moonshine-ai/moonshine) (MIT, Useful
+  Sensors). `server/brain/moonshine.py` is adapted from its
+  `useful-moonshine-onnx` package; the models download on first use.
 - The optional local voice is [Piper](https://github.com/OHF-Voice/piper1-gpl)
   (GPL-3.0) with [Parselmouth](https://github.com/YannickJadoul/Parselmouth),
   Python bindings for [Praat](https://www.fon.hum.uva.nl/praat/) (GPL-3.0).
