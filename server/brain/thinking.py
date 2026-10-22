@@ -171,6 +171,36 @@ def _image_part(jpeg: bytes) -> dict:
     return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
 
 
+def _repair(messages: list[dict]) -> list[dict]:
+    """The history with any broken tool exchange left out: a tool result
+    whose call isn't right before it, or a call missing a result. The API
+    refuses either (400), and would keep refusing every later request."""
+    out: list[dict] = []
+    i = 0
+    while i < len(messages):
+        m = messages[i]
+        if m.get("role") == "tool":
+            i += 1  # an orphan: its call isn't directly before it
+            continue
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            ids = {c["id"] for c in m["tool_calls"]}
+            j = i + 1
+            results = []
+            while j < len(messages) and messages[j].get("role") == "tool":
+                results.append(messages[j])
+                j += 1
+            if {r.get("tool_call_id") for r in results} >= ids:
+                out.append(m)
+                out.extend(r for r in results if r.get("tool_call_id") in ids)
+            elif m.get("content"):
+                out.append({"role": "assistant", "content": m["content"]})
+            i = j
+            continue
+        out.append(m)
+        i += 1
+    return out
+
+
 class RobotBrain:
     def __init__(self, actions: dict[str, Action] | None = None) -> None:
         self.client = openai.OpenAI(
@@ -186,7 +216,11 @@ class RobotBrain:
         # work them out from the conversation.
         self.situation: Callable[[], str] | None = None
         self.emotion = "neutral"        # emotion of the reply in progress
-        self._inflight: tuple[int, dict] | None = None  # (index, user message) being answered
+        # The turn being answered: its messages (the question, any tool calls
+        # and results) go into history only when it finishes. Abandoned or
+        # failed turns leave nothing behind; a half turn (a tool result whose
+        # call was cut) gets every later request refused with a 400.
+        self._inflight: list[dict] | None = None
 
     def ask(self, question: str, jpeg: bytes | None = None, camera_wanted: bool = False) -> Reply:
         """The whole reply at once. See reply() for the streaming form."""
@@ -219,63 +253,63 @@ class RobotBrain:
             content.append({"type": "text", "text": "(Your camera has no fresh picture right now, so you cannot see anything at the moment.)"})
         if self.situation is not None:
             content.append({"type": "text", "text": f"({self.situation()})"})
-        user_msg = {"role": "user", "content": content}
-        self.history.append(user_msg)
-        mark = len(self.history) - 1
-        self._inflight = (mark, user_msg)
+        turn: list[dict] = [{"role": "user", "content": content}]
+        self._inflight = turn
         self.emotion = "neutral"
         spoken: list[str] = []
         error: tuple[str, str] | None = None
 
-        gen = self._converse(on_emotion, cancelled or threading.Event())
+        gen = self._converse(turn, on_emotion, cancelled or threading.Event())
         try:
             for sentence in gen:
                 spoken.append(sentence)
                 yield sentence
         except (Interrupted, GeneratorExit):
             gen.close()
-            self._forget(mark, user_msg)
+            if self._inflight is turn:
+                self._inflight = None
             raise
         except openai.APIConnectionError:
             error = ("Brain cannot reach internet. Bad bad bad.", "sad")
         except openai.AuthenticationError:
             error = ("Brain has no key. Set LLM_API_KEY, human.", "sad")
         except openai.APIStatusError as e:
+            print(f"  (API error {e.status_code}: {getattr(e, 'message', e)})")
             error = (f"Ow. Brain hurts. API error {e.status_code}.", "sad")
         finally:
             gen.close()
 
         if error is not None:
-            self._forget(mark, user_msg)
+            if self._inflight is turn:
+                self._inflight = None
             self.emotion = error[1]
             if on_emotion is not None:
                 on_emotion(self.emotion)
             yield error[0]
             return
 
+        if self._inflight is not turn:
+            return  # abandoned while it ran (the human kept talking): keep none of it
+        self._inflight = None
+        self.history.extend(turn)
         if spoken:
             # Remember what was actually said, so he can't refer back to a
             # part that got cut.
             self.history.append({"role": "assistant", "content": f"[{self.emotion}] {' '.join(spoken)}"})
-        self._inflight = None
         self._strip_images()
         self._trim_history()
 
     def abandon(self) -> None:
-        """Forget the question being answered right now (the human kept talking)."""
-        if self._inflight is not None:
-            self._forget(*self._inflight)
-
-    def _forget(self, mark: int, user_msg: dict) -> None:
-        # Only cut if that question is still where we left it: a newer one may
-        # already have taken its place.
-        if mark < len(self.history) and self.history[mark] is user_msg:
-            del self.history[mark:]
+        """Forget the question being answered right now (the human kept
+        talking). Its turn is never added to the history, even if the model
+        call finishes after this."""
         self._inflight = None
 
-    def _converse(self, on_emotion: Callable[[str], None] | None, cancelled: threading.Event) -> Iterator[str]:
+    def _converse(self, turn: list[dict], on_emotion: Callable[[str], None] | None,
+                  cancelled: threading.Event) -> Iterator[str]:
         """One question, possibly several model calls if it uses its abilities.
-        Yields sentences as they complete."""
+        Yields sentences as they complete. The turn's messages go in `turn`,
+        not the history (see reply())."""
         nudged = False
         limit = config.REPLY_MAX_SENTENCES
         tools = [t for t in TOOLS if t["function"]["name"] in self.actions]
@@ -285,7 +319,8 @@ class RobotBrain:
             stream = self.client.chat.completions.create(
                 model=config.MODEL,
                 max_tokens=config.LLM_MAX_TOKENS,  # backstop; the sentence limit does the real work
-                messages=[{"role": "system", "content": personality.SYSTEM_PROMPT}, *self.history],
+                messages=[{"role": "system", "content": personality.SYSTEM_PROMPT},
+                          *_repair(self.history), *turn],
                 tools=tools or openai.NOT_GIVEN,
                 stream=True,
             )
@@ -355,7 +390,7 @@ class RobotBrain:
                         c["args"] = {}
                     if not isinstance(c["args"], dict):
                         c["args"] = {}
-                self.history.append({
+                turn.append({
                     "role": "assistant",
                     "content": "".join(raw),
                     "tool_calls": [
@@ -380,9 +415,9 @@ class RobotBrain:
                         if img:
                             fresh = img
                     print(f"  [{c['name']} {args} -> {text}]")
-                    self.history.append({"role": "tool", "tool_call_id": c["id"], "content": text})
+                    turn.append({"role": "tool", "tool_call_id": c["id"], "content": text})
                 if fresh is not None:
-                    self.history.append({
+                    turn.append({
                         "role": "user",
                         "content": [{"type": "text", "text": "Camera view after moving:"}, _image_part(fresh)],
                     })
@@ -391,10 +426,10 @@ class RobotBrain:
             if not "".join(raw).strip() and not nudged:
                 # Some models go quiet right after using an ability. Ask once.
                 nudged = True
-                self.history.append({"role": "user", "content": "(Tell your human what you just did, in one short line.)"})
+                turn.append({"role": "user", "content": "(Tell your human what you just did, in one short line.)"})
                 continue
-            if nudged and self.history and self.history[-1].get("role") == "user":
-                self.history.pop()  # don't keep the nudge in the transcript
+            if nudged and turn and turn[-1].get("role") == "user":
+                turn.pop()  # don't keep the nudge in the transcript
             tail = buf.strip()
             if tail and spoken < limit:
                 yield tail
