@@ -98,13 +98,15 @@ class MoonshineTranscriber:
 def collapse_repeats(text: str) -> str:
     """Moonshine sometimes runs on, repeating the whole utterance: "go to sleep
     go to sleep" for "go to sleep" (seen 4 times in ~60 utterances; Whisper
-    heard each once). A transcript that is one phrase of 2+ words said 2+
-    times becomes one copy. One repeated word ("Rocky rocky rocky") is left
-    alone: people say that."""
+    heard each once), sometimes stopping partway through a copy. A
+    transcript that is one phrase of 2+ different words said 2+ times
+    becomes one copy. One repeated word ("Rocky rocky rocky") is left alone:
+    people say that."""
     words = text.split()
     key = [w.strip(".,!?;:").lower() for w in words]
     for size in range(2, len(words) // 2 + 1):
-        if (len(words) % size == 0 and len(set(key[:size])) > 1
+        # whole copies, then maybe a cut-off one: "go to sleep go to sleep go to"
+        if (len(set(key[:size])) > 1
                 and all(key[i] == key[i % size] for i in range(len(words)))):
             return " ".join(words[:size]).rstrip(",;:")
     return text
