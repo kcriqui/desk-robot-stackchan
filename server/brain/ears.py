@@ -223,6 +223,18 @@ def make_transcriber(engine: str):
     return Transcriber()
 
 
+class _OneAtATime:
+    """A transcriber shared by two threads (the wake check and compare mode)."""
+
+    def __init__(self, transcriber) -> None:
+        self._t = transcriber
+        self._lock = threading.Lock()
+
+    def transcribe(self, audio: np.ndarray) -> str:
+        with self._lock:
+            return self._t.transcribe(audio)
+
+
 _WAKE_CLEAN = re.compile(r"[^a-z' ]+")
 
 
@@ -335,12 +347,18 @@ class Ears:
         self._highpass = HighPass()
         self._segmenter = Segmenter(SileroVAD(), SmartTurn(config.TURN_THREADS), on_speech_start)
         self.transcriber = make_transcriber(config.STT_ENGINE)
+        # Moonshine can't be told his name and often mishears it ("You rocket
+        # champ"), so while he needs a wake word, an utterance in which it
+        # found none gets a second listen from Whisper, which is told it.
+        # main.py sets wake_needed (he's asleep, or his awake time is up).
+        self.wake_needed: Callable[[], bool] = lambda: False
+        self._wake_check = _OneAtATime(Transcriber()) if config.STT_ENGINE == "moonshine" else None
         # DEBUG_STT_COMPARE: the other engine hears each utterance too, on its
         # own thread after this one has passed it on, so replies aren't delayed.
         self._compare: tuple[str, object, queue.Queue] | None = None
         if config.DEBUG_STT_COMPARE:
             other = "whisper" if config.STT_ENGINE == "moonshine" else "moonshine"
-            self._compare = (other, make_transcriber(other), queue.Queue(maxsize=1))
+            self._compare = (other, self._wake_check or make_transcriber(other), queue.Queue(maxsize=1))
             threading.Thread(target=self._run_compare, daemon=True).start()
 
     def set_source(self, source: str) -> None:
@@ -444,6 +462,13 @@ class Ears:
             t0 = time.time()
             text = self.transcriber.transcribe(utterance)
             print(f"  (turn: {segmenter.last_decision}; {config.STT_ENGINE} transcribed in {time.time() - t0:.2f}s)")
+            if self._wake_check is not None and self.wake_needed() and not strip_wake_word(text)[0]:
+                t1 = time.time()
+                second = self._wake_check.transcribe(utterance)
+                if strip_wake_word(second)[0]:
+                    print(f"  (wake check: {config.STT_ENGINE} heard {text!r}; whisper heard "
+                          f"{second!r} in {time.time() - t1:.2f}s, using that)")
+                    text = second
             if text:
                 self.on_utterance(text, segmenter.started_at, segmenter.ended_at)
             if self._compare is not None:

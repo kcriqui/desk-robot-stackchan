@@ -914,6 +914,8 @@ async def start_listening() -> None:
                 on_speech_start=lambda: loop.call_soon_threadsafe(speech_started.set),
             ),
         )
+        # Asleep or out of awake time, he needs his name to answer.
+        ears.wake_needed = lambda: time.time() >= awake_until
         mic = await loop.run_in_executor(None, ears.start)
     except Exception as e:
         ears = None
