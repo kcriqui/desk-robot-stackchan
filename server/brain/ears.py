@@ -345,7 +345,8 @@ class Ears:
         self._stream = None
         self._worker: threading.Thread | None = None
         self._highpass = HighPass()
-        self._segmenter = Segmenter(SileroVAD(), SmartTurn(config.TURN_THREADS), on_speech_start)
+        self._segmenter = Segmenter(SileroVAD(), SmartTurn(config.TURN_THREADS), on_speech_start,
+                                    pre_roll=config.PRE_ROLL_SECONDS)
         self.transcriber = make_transcriber(config.STT_ENGINE)
         # Moonshine can't be told his name and often mishears it ("You rocket
         # champ"), so while he needs a wake word, an utterance in which it

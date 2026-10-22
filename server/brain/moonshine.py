@@ -104,6 +104,8 @@ def collapse_repeats(text: str) -> str:
     people say that."""
     words = text.split()
     key = [w.strip(".,!?;:").lower() for w in words]
+    if len(words) >= 4 and len(set(key)) == 1:
+        return words[0].rstrip(",;:")  # "Computer computer ... computer" (x7, from one "Computer.")
     for size in range(2, len(words) // 2 + 1):
         # whole copies, then maybe a cut-off one: "go to sleep go to sleep go to"
         if (len(set(key[:size])) > 1

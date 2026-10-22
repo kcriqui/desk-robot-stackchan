@@ -28,10 +28,11 @@ class CollapseRepeatsTests(unittest.TestCase):
         self.assertEqual(c("Stop here stop here stop here stop here"), "Stop here")
         self.assertEqual(c("Go to sleep. Go to sleep."), "Go to sleep.")
         self.assertEqual(c("Go to sleep go to sleep go to"), "Go to sleep")
+        self.assertEqual(c("Computer computer computer computer computer"), "Computer")
 
     def test_real_repeats_are_kept(self):
         c = moonshine.collapse_repeats
-        for text in ("Rocky rocky rocky rocky", "Happy happy happy", "What time is it?",
+        for text in ("Rocky rocky rocky", "Happy happy happy", "What time is it?",
                      "One, two, three, four, five."):
             self.assertEqual(c(text), text)
 

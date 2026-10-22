@@ -245,7 +245,11 @@ MIC_DEVICE = os.environ.get("MIC_DEVICE") or None  # local input by name (set MI
 # re-checking every TURN_RECHECK_SECONDS, and gives up waiting after
 # TURN_MAX_SILENCE seconds of quiet. If Rocky keeps cutting you off, raise
 # TURN_THRESHOLD; if he waits too long after you finish, lower it.
-VAD_THRESHOLD = 0.4
+VAD_THRESHOLD = 0.5      # 0.4 let more background sound (TV, radio) through on the StackChan
+# Audio kept from before speech is detected, so a soft start isn't cut off.
+# 0.3 lost the first words on the StackChan's quiet mic ("Give me a list..."
+# came out "A list...").
+PRE_ROLL_SECONDS = 0.8
 TURN_PAUSE_SECONDS = 0.2
 TURN_RECHECK_SECONDS = 0.6
 TURN_MAX_SILENCE = 2.5
