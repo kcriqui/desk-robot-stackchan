@@ -14,6 +14,7 @@
 #include "face_gfx.h"
 #include "link.h"
 #include "mic.h"
+#include "wake.h"
 #include "servo_neck.h"
 #include "speaker.h"
 
@@ -42,6 +43,7 @@ ServoNeck tiltNeck;
 Link brainLink;
 Speaker speaker;
 Mic mic;
+Wake wake;
 Camera camera;
 uint32_t nextTempMs = 0;
 volatile bool speakDonePending = false;  // set by the speaker task, sent from loop()
@@ -95,6 +97,20 @@ void applyGlances() {
 // servos already let go at rest (SERVO_AUTO_RELAX).
 bool streamWanted = false;
 float streamFps = 10.0f;
+
+// The mic, and the wake word on the robot. The brain turns the mic on, and
+// turns on robot-side waking ("wake on") when it can use it. Then, asleep,
+// the mic sends nothing: the wake engine listens instead, and on the wake
+// word the robot opens his eyes and streams again, starting with the 2 s
+// before it so the brain hears the whole request.
+bool micWanted = false;
+bool wakeOnRobot = false;
+
+void applyMic() {
+  bool sleeping = wakeOnRobot && face.asleep();
+  wake.setListening(sleeping && brainConnected);
+  mic.setStreaming(micWanted && !sleeping);
+}
 uint8_t awakeBrightness = 0;
 
 void applyStream() {
@@ -113,6 +129,7 @@ void setAsleep(bool on) {
   face.setAsleep(on);
   applyGlances();
   applyStream();
+  applyMic();
 }
 uint32_t nextDemoEmotionMs = 0;
 uint8_t demoEmotionIdx = 0;
@@ -222,8 +239,21 @@ void handleCommand(String line) {
     speaker.endSpeech();
     Serial.println(F("beep"));
   } else if (cmd == "mic") {
-    mic.setStreaming(arg == "on");
-    Serial.printf("mic %s\n", mic.streaming() ? "on" : "off");
+    micWanted = (arg == "on");
+    applyMic();
+    Serial.printf("mic %s%s\n", micWanted ? "on" : "off",
+                  micWanted && !mic.streaming() ? " (asleep: the wake word engine listens)" : "");
+  } else if (cmd == "wake") {
+    // wake on|off: robot-side waking (the brain sends this); wake <0-1>: threshold
+    if (arg == "on" || arg == "off") {
+      wakeOnRobot = (arg == "on") && wake.ready();
+      applyMic();
+    } else if (!arg.isEmpty()) {
+      wake.setThreshold(arg.toFloat());
+    }
+    Serial.printf("wake: %s, \"%s\" %s, %lu detections (engine: %s)\n", wakeOnRobot ? "on" : "off",
+                  wake.word(), wake.listening() ? "listening" : "idle", (unsigned long)wake.count(),
+                  wake.status());
   } else if (cmd == "miclevel") {
     for (int i = 0; i < 12; ++i) {
       delay(250);
@@ -319,6 +349,15 @@ void setup() {
                  TILT_GLANCE_DEG, TILT_INVERT, TILT_REST_DEG);
 
   mic.begin(MIC_GAIN);
+  if (wake.begin("spiffs", WAKE_MODEL)) {
+    mic.setTap([](const int16_t* s, size_t n) { wake.push(s, n); });
+#if HAVE_BRAIN
+    brainLink.setWakeWord(wake.word());  // tells the brain in the hello
+#endif
+  }
+#if HAVE_BRAIN
+  brainLink.setAsleepSource([]() { return face.asleep(); });
+#endif
   speaker.begin(&mic, SPEAKER_VOLUME, []() { speakDonePending = true; });
   // Last: it borrows the internal I2C bus the others set up on.
   if (camera.begin()) Serial.println(F("camera: ready"));
@@ -335,7 +374,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.3.2 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.4.1 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -353,8 +392,11 @@ void setup() {
                demoMode = !connected;
                if (connected) {
                  face.setEmotion(Emotion::Happy);
+               } else {
+                 wakeOnRobot = false;  // a brain that doesn't ask gets the old behaviour
                }
                applyGlances();
+               applyMic();
              });
 #else
   Serial.println(F("no include/secrets.h — USB-only mode (see secrets.h.example)"));
@@ -395,8 +437,20 @@ void loop() {
                   speaker.lastUnderruns(), speaker.lastPrebuffered(),
                   speaker.lastPrebufferMs(), WiFi.RSSI());
   }
+  if (wake.takeDetection() && wakeOnRobot && brainConnected && face.asleep()) {
+    // Heard the wake word: tell the brain, open his eyes, and stream from
+    // 2 s back. The brain checks the transcript and puts him back to sleep
+    // if the wake word isn't in it.
+    Serial.printf("wake: \"%s\" heard (%lu)\n", wake.word(), (unsigned long)wake.count());
+    brainLink.sendJson(String("{\"type\":\"wake\",\"word\":\"") + wake.word() + "\"}");
+    mic.startWithPreroll();
+    setAsleep(false);
+  }
   {
     static uint8_t frame[Mic::FRAME_BYTES];
+    while (brainLink.connected() && mic.nextPreroll(frame)) {
+      brainLink.sendBinary(0x01, frame, sizeof(frame));
+    }
     while (brainLink.connected() && mic.nextFrame(frame)) {
       brainLink.sendBinary(0x01, frame, sizeof(frame));
     }

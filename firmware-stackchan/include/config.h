@@ -49,6 +49,15 @@ constexpr float TILT_GLANCE_DEG = 8.0f;
 // Raise if the brain says "too quiet", lower if loud speech clips.
 constexpr float MIC_GAIN = 1.0f;
 
+// ─── Wake word ───────────────────────────────────────────────────────────────
+// The robot can listen for its wake word itself (esp-sr WakeNet), so that
+// asleep it sends no audio until it hears it. The model comes from
+// sr_models/ and is uploaded separately: `python tools/srmodels.py upload`.
+// Espressif's free models include wn9_computer_tts ("Computer"),
+// wn9_jarvis_tts, wn9_histackchan_tts3 and wn9_hiesp; changing it means
+// putting that model's folder in sr_models/ and uploading again.
+constexpr const char* WAKE_MODEL = "wn9_computer_tts";
+
 // ─── Camera ──────────────────────────────────────────────────────────────────
 // The CoreS3's GC0308 has no hardware JPEG, so frames are compressed in
 // software, at ~90-120 ms a frame: about 8 fps is all it can do at 320x240,

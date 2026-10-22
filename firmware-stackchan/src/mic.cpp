@@ -11,11 +11,27 @@ static const int NUM_BUFS = 4;
 void Mic::begin(float gain) {
   gain_ = gain;
   queue_ = xQueueCreate(16, FRAME_BYTES);  // ~0.5 s of frames
+  ring_ = static_cast<int16_t*>(ps_malloc(PREROLL_FRAMES * FRAME_BYTES));
+  preroll_ = static_cast<int16_t*>(ps_malloc(PREROLL_FRAMES * FRAME_BYTES));
   xTaskCreatePinnedToCore(taskEntry, "mic", 4096, this, 2, nullptr, 0);
 }
 
 bool Mic::nextFrame(uint8_t* out) {
   return queue_ != nullptr && xQueueReceive(queue_, out, 0) == pdTRUE;
+}
+
+bool Mic::nextPreroll(uint8_t* out) {
+  size_t count = prerollCount_.load();
+  if (prerollSent_ >= count) {
+    if (count) {  // all sent
+      prerollCount_ = 0;
+      prerollSent_ = 0;
+    }
+    return false;
+  }
+  memcpy(out, preroll_ + prerollSent_ * FRAME_SAMPLES, FRAME_BYTES);
+  prerollSent_++;
+  return true;
 }
 
 bool Mic::release(uint32_t timeoutMs) {
@@ -75,6 +91,25 @@ void Mic::task() {
       sumSq += (s / 32768.0f) * (s / 32768.0f);
     }
     level_ = sqrtf(sumSq / FRAME_SAMPLES);
+
+    if (tap_) tap_(frame, FRAME_SAMPLES);
+    if (prerollWanted_ && ring_ && preroll_) {
+      // Hand the frames that weren't sent to loop(), oldest first, then
+      // stream from this frame on.
+      size_t n = ringCount_, start = (ringHead_ + PREROLL_FRAMES - n) % PREROLL_FRAMES;
+      for (size_t i = 0; i < n; ++i)
+        memcpy(preroll_ + i * FRAME_SAMPLES, ring_ + ((start + i) % PREROLL_FRAMES) * FRAME_SAMPLES, FRAME_BYTES);
+      ringCount_ = 0;
+      prerollSent_ = 0;
+      prerollCount_ = n;
+      prerollWanted_ = false;
+      streaming_ = true;
+    }
+    if (!streaming_ && ring_) {  // keep what isn't sent, for the next preroll
+      memcpy(ring_ + ringHead_ * FRAME_SAMPLES, frame, FRAME_BYTES);
+      ringHead_ = (ringHead_ + 1) % PREROLL_FRAMES;
+      if (ringCount_ < PREROLL_FRAMES) ringCount_++;
+    }
 
     if (streaming_) {
       // If loop() has fallen behind, drop the oldest frame rather than block.

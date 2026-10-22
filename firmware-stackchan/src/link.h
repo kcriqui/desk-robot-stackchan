@@ -24,6 +24,12 @@ class Link {
   // Binary frames from the brain: type byte 0x01 = TTS audio (16 kHz s16le).
   void onAudio(AudioHandler h) { onAudio_ = std::move(h); }
 
+  // Announced in the hello: the robot listens for this wake word itself.
+  void setWakeWord(const char* word) { wakeWord_ = word; }
+  // Also in the hello: whether his eyes are shut, so a restarted brain
+  // carries on where the robot is instead of putting him to sleep.
+  void setAsleepSource(std::function<bool()> f) { asleep_ = std::move(f); }
+
   // Call every loop().
   void update(uint32_t nowMs);
 
@@ -49,4 +55,6 @@ class Link {
   bool connected_ = false;
   bool wifiReported_ = false;
   uint32_t nextStateMs_ = 0;
+  const char* wakeWord_ = nullptr;
+  std::function<bool()> asleep_;
 };

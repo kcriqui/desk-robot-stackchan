@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-static const char* FW_VERSION = "0.3.2";
+static const char* FW_VERSION = "0.4.1";
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
@@ -78,6 +78,8 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
       doc["who"] = "desk-robot";
       doc["fw"] = FW_VERSION;
       doc["token"] = token_;  // the brain drops connections without it
+      if (wakeWord_) doc["wake"] = wakeWord_;
+      if (asleep_) doc["asleep"] = asleep_();
       String out;
       serializeJson(doc, out);
       sendJson(out);
@@ -131,6 +133,8 @@ void Link::handleMessage(const char* json) {
     cmd = String("glance ") + ((doc["on"] | true) ? "on" : "off");
   } else if (!strcmp(type, "asleep")) {
     cmd = String("sleep ") + ((doc["on"] | false) ? "on" : "off");
+  } else if (!strcmp(type, "wake_word")) {
+    cmd = String("wake ") + ((doc["on"] | false) ? "on" : "off");
   } else if (!strcmp(type, "stream")) {
     cmd = String("stream ") + ((doc["on"] | false) ? "on " : "off ") + String(doc["fps"] | 10.0f, 1);
   } else {

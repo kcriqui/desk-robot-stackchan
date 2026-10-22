@@ -182,6 +182,18 @@ WAKE_PHRASES = [  # "hey"/"hi" + each name, then what speech-to-text tends to he
     "a rocky",
     "hey ricky",
 ]
+# The robot can listen for a wake word itself (firmware-stackchan with an
+# esp-sr model; it says which in its hello). Then, asleep, it sends no audio
+# until it hears it, and the brain only checks that the transcript that
+# follows contains it (a false wake goes straight back to sleep).
+# WAKE_ON_ROBOT=0 in server/.env makes the brain listen for his name in the
+# audio instead, as without the feature. ROBOT_WAKE_WORD is what the
+# robot's model listens for, as speech-to-text writes it.
+WAKE_ON_ROBOT = os.environ.get("WAKE_ON_ROBOT", "1") not in ("", "0")
+ROBOT_WAKE_WORD = os.environ.get("ROBOT_WAKE_WORD", "computer").strip().lower()
+# After the robot wakes, how long to wait for something to be said before
+# deciding it was a false wake and going back to sleep.
+ROBOT_WAKE_GRACE_SECONDS = 8.0
 WAKE_PHRASES = list(dict.fromkeys(WAKE_PHRASES))
 # Also wake on his name alone at the very start of a sentence ("Rocky, ...",
 # "Rocky."). A name further in ("I told Rocky...") still doesn't wake him.

@@ -10,11 +10,15 @@ The rest of the frame is the payload.
 ## Robot → server
 
 ```json
-{"type": "hello", "who": "desk-robot", "fw": "0.3.2", "token": "..."}  // must be the first message; token = ROBOT_TOKEN
+{"type": "hello", "who": "desk-robot", "fw": "0.4.1", "token": "...", "wake": "computer"}  // must be the first message; token = ROBOT_TOKEN.
+                                  // "wake": the wake word the robot can listen for itself (firmware-stackchan with a model)
+                                  // "asleep": whether its eyes are shut, so a restarted brain keeps the state
 {"type": "state", "pan": 12.5, "emotion": "neutral"}
 {"type": "temp", "c": 52.0}       // chip temperature, sent every ~10 s
 {"type": "battery", "v": 3.92, "ma": 410}  // firmware-stackchan: battery volts and mA (+ discharging, - charging), every ~10 s
 {"type": "speak_done"}            // finished playing the last reply
+{"type": "wake", "word": "computer"}  // heard its wake word while asleep: eyes open, and mic audio
+                                  // follows, starting ~2 s before the word
 ```
 
 Binary `0x01` frames: microphone audio, 16 kHz mono signed 16-bit PCM,
@@ -43,6 +47,8 @@ settle. The server takes either type.
 {"type": "asleep", "on": true}    // eyes shut + Z's; false = wake up. Asleep = no idle glances;
                                   // firmware-stackchan also pauses the camera stream and dims the screen
                                   // (sent on connect too, so both sides agree)
+{"type": "wake_word", "on": true} // robot-side waking: asleep, the mic sends nothing and the
+                                  // robot listens for its wake word itself (sends "wake")
 {"type": "glance", "on": false}   // allow/forbid the firmware's idle head glances; the server sends off on connect and leaves them off
 {"type": "mic", "on": true}       // stream the microphone to the server
 {"type": "stream", "on": true, "fps": 10}   // start/stop the camera stream, set rate

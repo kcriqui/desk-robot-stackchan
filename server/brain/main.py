@@ -35,6 +35,7 @@ import asyncio
 import json
 import os
 import queue
+import re
 import secrets
 import struct
 import sys
@@ -51,6 +52,10 @@ from .eyes import Eyes
 from .tracker import Tracker
 
 robot_socket: websockets.ServerConnection | None = None
+# The wake word the connected robot listens for itself (its hello says),
+# when WAKE_ON_ROBOT allows it; None = the brain listens for his name.
+robot_wake_word: str | None = None
+robot_woke_at = 0.0  # when the robot last heard it; 0 once a transcript settled it
 brain: RobotBrain | None = None  # created in main() once the event loop exists
 ears: Ears | None = None
 # (text, when speech began, when it ended, when the transcript was ready)
@@ -159,10 +164,25 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         await old.close(1001)
     robot_socket = websocket
     print(f"robot connected! (fw {hello.get('fw', '?')}, {peer})")
+    global robot_wake_word, robot_asleep
+    offered = str(hello.get("wake") or "").strip().lower()
+    robot_wake_word = offered if offered and config.WAKE_ON_ROBOT else None
+    if robot_wake_word:
+        print(f"wake word: the robot listens for \"{robot_wake_word}\" itself; asleep, it sends no audio")
+        global awake_until
+        if hello.get("asleep") is False and time.time() >= awake_until:
+            # Awake when this brain (re)started: carry on as after a reply,
+            # rather than shutting his eyes mid-conversation.
+            awake_until = time.time() + config.AWAKE_SECONDS
+            robot_asleep = False
+        elif time.time() >= awake_until:
+            robot_asleep = True  # not in a conversation: let the robot do the listening
     pick_mic_source()
     if config.MIC_SOURCE in ("auto", "robot"):
         await send_to_robot({"type": "mic", "on": True})
     await apply_camera()
+    if offered:  # older firmware doesn't know the message
+        await send_to_robot({"type": "wake_word", "on": bool(robot_wake_word)})
     # Agree on sleep: the robot may have kept its eyes shut (and its camera
     # off) across a brain restart, or come back awake after a reboot.
     await send_to_robot({"type": "asleep", "on": robot_asleep})
@@ -198,6 +218,9 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
                 except (TypeError, ValueError):
                     pass  # not a number; leave the last reading
                 continue
+            if event.get("type") == "wake":  # the robot heard its wake word
+                await on_robot_wake(str(event.get("word") or "?"))
+                continue
             if event.get("type") == "battery":  # every ~10 s (firmware-stackchan)
                 try:
                     eyes.battery = battery.Reading(float(event["v"]), float(event["ma"]), time.time())
@@ -212,6 +235,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         # new connection can arrive before the old one is noticed as dead.
         if robot_socket is websocket:
             robot_socket = None
+            robot_wake_word = None
             print("robot disconnected")
             pick_mic_source()
 
@@ -915,7 +939,9 @@ async def start_listening() -> None:
             ),
         )
         # Asleep or out of awake time, he needs his name to answer.
-        ears.wake_needed = lambda: time.time() >= awake_until
+        # (Not when the robot does the waking: then only audio after its
+        # wake word arrives, and the transcript check is in _handle_heard.)
+        ears.wake_needed = lambda: robot_wake_word is None and time.time() >= awake_until
         mic = await loop.run_in_executor(None, ears.start)
     except Exception as e:
         ears = None
@@ -965,6 +991,12 @@ async def doze_loop() -> None:
     was_awake = False
     while True:
         await asyncio.sleep(1)
+        if robot_woke_at and time.time() - robot_woke_at > config.ROBOT_WAKE_GRACE_SECONDS and not (
+                ears is not None and ears.hearing):
+            # The robot woke but nothing was said: a false wake.
+            await back_to_sleep("the robot woke, but nothing followed")
+            was_awake = False
+            continue
         awake = time.time() < awake_until
         if was_awake and not awake:
             print(f"({config.ROBOT_NAME} dozed off — say \"hey {config.ROBOT_NAME}\" to wake him)")
@@ -985,6 +1017,32 @@ async def _next_heard() -> tuple[str, float, float, float] | None:
             hearing = ears is not None and ears.hearing
             if (not hearing and waited >= 4.0) or waited >= 30.0:
                 return None
+
+
+async def on_robot_wake(word: str) -> None:
+    """The robot heard its wake word, opened its eyes and is streaming the
+    audio from just before it. Wake up properly; the next transcript must
+    contain the wake word, or it was a false wake (see _handle_heard)."""
+    global awake_until, robot_woke_at
+    print(f"(the robot heard \"{word}\": awake, listening)")
+    robot_woke_at = time.time()
+    awake_until = time.time() + config.AWAKE_SECONDS
+    await set_asleep(False)
+    await send_to_robot({"type": "emotion", "name": "surprised"})
+    if tracker is None or not tracker.tracking:
+        await send_to_robot({"type": "tilt", "deg": config.TILT_WAKE})
+        if tracker is not None:
+            tracker.note_pose(tilt=config.TILT_WAKE)
+
+
+async def back_to_sleep(why: str) -> None:
+    """A false wake: eyes shut again, no announcement."""
+    global awake_until, robot_woke_at
+    print(f"({why}: back to sleep)")
+    robot_woke_at = 0.0
+    awake_until = 0.0
+    await send_to_robot({"type": "emotion", "name": "neutral"})
+    await set_asleep(True)
 
 
 async def announce(key: str, emotion: str, **values) -> None:
@@ -1053,8 +1111,19 @@ async def voice_loop() -> None:
 
 async def _handle_heard(item: tuple[str, float, float, float]) -> None:
     global awake_until
+    global robot_woke_at
     text, started_at, ended_at, heard_at = item
     woke, question = strip_wake_word(text)
+    if robot_woke_at:
+        # The first thing heard after the robot's wake word must contain it
+        # (the robot sends the audio from just before it). The question is
+        # whatever follows the word.
+        robot_woke_at = 0.0
+        m = re.search(rf"\b{re.escape(config.ROBOT_WAKE_WORD)}\b[\s,.!?:;-]*", text, re.IGNORECASE)
+        if m is None:
+            await back_to_sleep(f"the robot woke, but \"{text}\" has no \"{config.ROBOT_WAKE_WORD}\" in it")
+            return
+        woke, question = True, text[m.end():].strip()
     # Judge the follow-up window by when you STARTED talking, not by when
     # the transcript arrived — long sentences shouldn't time out.
     if not woke and started_at >= awake_until:
