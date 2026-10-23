@@ -41,6 +41,7 @@ def brain_with(actions):
     b.history = []
     b.actions = actions
     b.situation = None
+    b.memory = None
     b.emotion = "neutral"
     b._inflight = None
     return b
@@ -91,6 +92,17 @@ class HistoryTests(unittest.TestCase):
         fixed = thinking._repair(broken)
         self.assertEqual([m["role"] for m in fixed], ["user", "user", "assistant", "tool"])
         self.assertEqual(fixed[-1]["tool_call_id"], "z")
+
+    def test_long_term_memory_reaches_the_model_at_once(self):
+        """What he remembers is in the system prompt of every request, and a
+        fact kept during a turn is there for the very next call."""
+        known = []
+        b = brain_with({"look": lambda args: (known.append("- cats: Milo and Luna") or "looked left", None)})
+        b.memory = lambda: "MEMORY BLOCK:\n" + "\n".join(known) if known else ""
+        list(b.reply("Look left"))
+        first, second = (r[0]["content"] for r in b.client.requests)
+        self.assertNotIn("MEMORY BLOCK", first)           # nothing kept yet
+        self.assertTrue(second.endswith("\n\nMEMORY BLOCK:\n- cats: Milo and Luna"))
 
 
 if __name__ == "__main__":

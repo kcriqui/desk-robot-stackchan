@@ -363,3 +363,6 @@ TRACK_LOST_SECONDS = 4.0   # no face this long → idle glances resume
 
 # How many conversation turns to remember before forgetting the oldest.
 MAX_HISTORY_TURNS = 20
+# Facts he keeps for good (the remember / forget tools; memories.py). The
+# server/data folder is git-ignored.
+MEMORY_FILE = Path(os.environ.get("MEMORY_FILE") or Path(__file__).resolve().parent.parent / "data" / "memories.json")

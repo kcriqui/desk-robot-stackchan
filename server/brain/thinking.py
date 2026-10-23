@@ -10,7 +10,8 @@ Rocky has real abilities the model can call (tool use): `look` moves
 the head and comes back with a fresh camera frame from the new angle,
 `track_face` starts/stops following the human, `check_temperature` reads
 his chip's temperature, `set_timer` / `cancel_timer` manage reminders he
-announces himself, and on a StackChan `check_battery` reads his battery.
+announces himself, `remember` / `forget` keep facts in his long-term
+memory (memories.py), and on a StackChan `check_battery` reads his battery.
 main.py supplies the functions that actually do those things; only the
 tools it supplies are offered.
 """
@@ -157,6 +158,43 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "remember",
+            "description": (
+                "Keep a fact in your long-term memory, so you still know it in later "
+                "conversations and after a restart. One short, self-contained fact in plain "
+                f"words, naming who it's about (\"{config.HUMAN_NAME}'s cats are Milo and "
+                "Luna\"). If it replaces something you remember, forget the old one first."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact": {"type": "string", "description": "The fact, under 200 characters."},
+                    "days": {"type": "number", "description": (
+                        "Only for facts that stop being true (\"has a cold\": 7, \"guests this "
+                        "weekend\": 3). Omit for lasting facts.")},
+                },
+                "required": ["fact"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "forget",
+            "description": (
+                "Remove facts from your long-term memory: a few words from the fact, its "
+                "number, or \"all\" (only when your human clearly asks to forget everything)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"about": {"type": "string"}},
+                "required": ["about"],
+            },
+        },
+    },
 ]
 
 
@@ -219,6 +257,9 @@ class RobotBrain:
         # model (the "track me" shortcut, falling asleep), so it can't
         # work them out from the conversation.
         self.situation: Callable[[], str] | None = None
+        # Returns his long-term memory (memories.py) for the system prompt, or
+        # "" when he remembers nothing yet.
+        self.memory: Callable[[], str] | None = None
         self.emotion = "neutral"        # emotion of the reply in progress
         # The turn being answered: its messages (the question, any tool calls
         # and results) go into history only when it finishes. Abandoned or
@@ -320,10 +361,13 @@ class RobotBrain:
         for _ in range(5):
             if cancelled.is_set():
                 raise Interrupted()
+            # Read each round: a fact he just remembered counts straight away.
+            known = self.memory() if self.memory is not None else ""
+            system = personality.SYSTEM_PROMPT + (f"\n\n{known}" if known else "")
             stream = self.client.chat.completions.create(
                 model=config.MODEL,
                 max_tokens=config.LLM_MAX_TOKENS,  # backstop; the sentence limit does the real work
-                messages=[{"role": "system", "content": personality.SYSTEM_PROMPT},
+                messages=[{"role": "system", "content": system},
                           *_repair(self.history), *turn],
                 tools=tools or openai.NOT_GIVEN,
                 stream=True,

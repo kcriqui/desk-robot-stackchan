@@ -30,6 +30,9 @@ firmware-stackchan/ota.ini
 # Mic debug recordings
 server/debug/
 
+# Rocky's long-term memory (facts about you; memories.py)
+server/data/
+
 # Session file some tools drop at the repo root
 :memory:.ses
 

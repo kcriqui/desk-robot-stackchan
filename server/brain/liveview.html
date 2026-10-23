@@ -139,6 +139,14 @@
   .tune .name small { color: var(--muted); }
   .tune .v { font: 13px var(--mono); color: var(--amber); text-align: right; }
 
+  .mems { list-style: none; margin: 0 0 12px; padding: 0; }
+  .mems li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 14px; align-items: baseline;
+             padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .mems li.empty { display: block; color: var(--muted); }
+  .mems .when { font: 11px var(--mono); color: var(--muted); }
+  .mems button { padding: 3px 9px; }
+  @media (max-width: 560px) { .mems li { grid-template-columns: minmax(0, 1fr) auto; } .mems .when { grid-column: 1; grid-row: 2; } }
+
   @media (prefers-reduced-motion: reduce) { .viewport, .horizon, .meridian, button, h1 .dot { transition: none; } }
 </style>
 </head>
@@ -213,6 +221,16 @@
       </div>
     </aside>
 
+    <section class="card tuning" aria-labelledby="l-mem">
+      <h2 class="label" id="l-mem"><span><span class="pname">{name}</span> remembers</span><span class="sub" id="memnote"></span></h2>
+      <ul class="mems" id="mems"></ul>
+      <form class="row" id="memform">
+        <input type="text" id="memtext" placeholder="A fact for {name} to keep…" maxlength="200" autocomplete="off">
+        <button type="submit">Remember</button>
+      </form>
+      <p class="hint">Kept for good in server/data/memories.json and given to him in every conversation. He also remembers and forgets things himself when you ask.</p>
+    </section>
+
     <section class="card tuning" aria-labelledby="l-tune">
       <h2 class="label" id="l-tune"><span>Listening</span><span class="sub">changes apply now and last until the server restarts · keep one by setting it in server/brain/config.py</span></h2>
       <div class="tune-grid" id="tunes"></div>
@@ -286,6 +304,7 @@
   $("trackbtn").onclick = () => act("track", { on: !status.tracking_enabled });
   $("sayform").onsubmit = ev => { ev.preventDefault(); const t = $("saytext").value.trim(); if (t) { act("say", { text: t }, "Saying it"); $("saytext").value = ""; } };
   document.querySelector('[data-act=ask]').onclick = () => { const t = $("saytext").value.trim(); if (t) { act("ask", { text: t }, "Asked " + NAME); $("saytext").value = ""; } };
+  $("memform").onsubmit = ev => { ev.preventDefault(); const t = $("memtext").value.trim(); if (t) { act("remember", { text: t }, "Remembered"); $("memtext").value = ""; } };
   document.querySelector('[data-act=wake]').onclick = () => act("sleep", { on: false }, NAME + " is awake");
   document.querySelector('[data-act=sleep]').onclick = () => act("sleep", { on: true }, NAME + " is asleep");
 
@@ -310,6 +329,31 @@
     for (const t of list) if (!dragging.has(t.key) && values[t.key] != null) { t.inp.value = values[t.key]; t.v.textContent = fmt(+values[t.key], t); }
   }
   function fmt(x, t) { return (t.step >= 1 ? Math.round(x) : x.toFixed(t.step < 0.1 ? 2 : 1)) + (t.unit || ""); }
+
+  // ── long-term memory ───────────────────────────────────────────────────
+  let memShown = null;
+  function showMemories(list) {
+    const key = JSON.stringify(list || []);
+    if (key === memShown) return;   // redraw only on a change, not every tick
+    memShown = key;
+    const ul = $("mems"); ul.replaceChildren();
+    $("memnote").textContent = list && list.length ? list.length + (list.length === 1 ? " fact" : " facts") : "";
+    if (!list || !list.length) {
+      const li = document.createElement("li"); li.className = "empty";
+      li.textContent = "Nothing yet. Tell him something worth keeping, or add it here.";
+      ul.appendChild(li); return;
+    }
+    for (const m of list) {   // textContent throughout: facts come from speech
+      const li = document.createElement("li");
+      const text = document.createElement("span"); text.textContent = m.text;
+      const when = document.createElement("span"); when.className = "when";
+      when.textContent = m.added + (m.until ? " → " + m.until : "");
+      const b = document.createElement("button"); b.className = "astro"; b.textContent = "Forget";
+      b.setAttribute("aria-label", "Forget: " + m.text);
+      b.onclick = () => act("forget", { id: m.id }, "Forgotten");
+      li.append(text, when, b); ul.appendChild(li);
+    }
+  }
 
   // ── the hearing strip ──────────────────────────────────────────────────
   const canvas = $("wave"), ctx = canvas.getContext("2d");
@@ -383,6 +427,7 @@
       drawWave();
       showSliders(TUNES, s.tuning);
       showSliders(VOICE, s.voice);
+      showMemories(s.memories);
     } catch (e) {
       $("link").textContent = "server?"; $("linkdot").className = "dot";
     }

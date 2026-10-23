@@ -45,6 +45,7 @@ import time
 import websockets
 
 from . import alerts, battery, config, mouth, personality
+from .memories import Memories
 from .timers import Timers, when
 from .thinking import Interrupted, RobotBrain
 from .ears import Ears, is_command, normalize, strip_wake_word
@@ -72,6 +73,7 @@ turn_lock = asyncio.Lock()
 camera_boost = 0  # looks in progress, which want full-rate frames
 last_visual_at = 0.0  # when a question last came with a picture, or he last used `look`
 timers = Timers()
+memories = Memories(config.MEMORY_FILE)
 said_unasked: list[tuple[float, str]] = []  # (when, what) he said on his own, newest last
 
 FRAME_BYTES = 3200  # 100 ms of 16 kHz s16le per audio frame to the robot
@@ -293,8 +295,16 @@ async def handle_console_line(line: str) -> bool:
             await set_volume(float(arg))
         except ValueError:
             print("usage: volume <0.0-1.0>")
+    elif cmd == "memories":
+        facts = memories.facts()
+        print("\n".join(f"  #{f.id} {f.text}  ({f.added}" + (f" to {f.until})" if f.until else ")")
+                        for f in facts) or "  (remembers nothing yet)")
+    elif cmd == "remember":
+        print(remember({"fact": arg})[0] if arg else "usage: remember <fact>")
+    elif cmd == "forget":
+        print(forget({"about": arg})[0] if arg else "usage: forget <words | #number | all>")
     else:
-        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | status | quit")
+        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | memories | remember <fact> | forget <words|#|all> | status | quit")
     return True
 
 
@@ -481,6 +491,31 @@ def cancel_timer(args: dict) -> tuple[str, bytes | None]:
     return ("Cancelled: " + "; ".join(t.about or "a timer" for t in gone) + ".", None)
 
 
+def _listed(facts) -> str:
+    return "; ".join(f"#{f.id} {f.text.rstrip('.')}" for f in facts)
+
+
+def remember(args: dict) -> tuple[str, bytes | None]:
+    days = args.get("days")
+    try:
+        fact, new = memories.add(str(args.get("fact") or ""), float(days) if days not in (None, "") else None)
+    except (TypeError, ValueError) as e:
+        return (f"Not remembered: {e}.", None)
+    print(f"  (memory {'+' if new else '='} #{fact.id} {fact.text}" + (f", until {fact.until}" if fact.until else "") + ")")
+    return ((f"Remembered as #{fact.id}" if new else f"You already remembered that (#{fact.id}); refreshed")
+            + (f", until {fact.until}." if fact.until else ", for good."), None)
+
+
+def forget(args: dict) -> tuple[str, bytes | None]:
+    gone = memories.forget(str(args.get("about") or ""))
+    if not gone:
+        left = memories.facts()
+        return ("Nothing matched. " + (f"You remember: {_listed(left)}. Forget by number to be exact."
+                                       if left else "Your memory is empty."), None)
+    print(f"  (memory - {_listed(gone)})")
+    return (f"Forgotten: {_listed(gone)}.", None)
+
+
 def check_battery(args: dict) -> tuple[str, bytes | None]:
     if eyes.battery is None:
         return ("No battery reading yet: your body hasn't reported one.", None)
@@ -514,7 +549,8 @@ ABILITIES = {
     "look": _sync(look),
     "track_face": _sync(lambda args: set_tracking(bool(args.get("on", True)))),
 }
-ABILITIES.update(check_temperature=check_temperature, set_timer=set_timer, cancel_timer=cancel_timer)
+ABILITIES.update(check_temperature=check_temperature, set_timer=set_timer, cancel_timer=cancel_timer,
+                 remember=remember, forget=forget)
 if config.BODY == "stackchan":  # the original body has no battery sensor
     ABILITIES["check_battery"] = check_battery
 
@@ -820,6 +856,7 @@ def console_state() -> dict:
         "tracking_enabled": tracker.enabled if tracker is not None else False,
         "volume": speaker_volume,
         "tuning": {k: getattr(config, k) for k in TUNABLE},
+        "memories": [{"id": f.id, "text": f.text, "added": f.added, "until": f.until} for f in memories.facts()],
     }
 
 
@@ -904,6 +941,18 @@ async def _console_command(action: str, payload: dict) -> dict:
         value = _number(payload, "value", *VOICE_TUNABLE[key])
         setattr(config, key, value)
         print(f"console: {key} = {value:g} (until restart; set it in config.py to keep)")
+    elif action == "remember":
+        fact, _ = memories.add(str(payload.get("text", "")))  # a ValueError goes back to the page
+        print(f"console: remember #{fact.id} {fact.text}")
+    elif action == "forget":
+        try:
+            fid = int(payload.get("id"))
+        except (TypeError, ValueError):
+            raise ValueError("id must be a number")
+        gone = memories.forget(str(fid))
+        if not gone:
+            raise ValueError(f"no memory #{fid}")
+        print(f"console: forget {_listed(gone)}")
     else:
         raise ValueError(f"no such control: {action}")
     return {}
@@ -1233,6 +1282,8 @@ async def main() -> None:
     main_loop = loop
     brain = RobotBrain(ABILITIES)
     brain.situation = situation
+    brain.memory = memories.prompt
+    print(f"long-term memory: {len(memories.facts())} facts in {config.MEMORY_FILE}")
     tracker = Tracker(eyes, lambda p, t, on: loop.call_soon_threadsafe(head_moves.put_nowait, (p, t, on)))
     eyes.has_annotator = True
     tracker.start()
