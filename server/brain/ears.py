@@ -349,10 +349,13 @@ class Ears:
                                     pre_roll=config.PRE_ROLL_SECONDS)
         self.transcriber = make_transcriber(config.STT_ENGINE)
         # Moonshine can't be told his name and often mishears it ("You rocket
-        # champ"), so while he needs a wake word, an utterance in which it
-        # found none gets a second listen from Whisper, which is told it.
-        # main.py sets wake_needed (he's asleep, or his awake time is up).
+        # champ"), or a lone "Computer" ("Conqueror", "You cheater"), so while
+        # he needs a wake word, an utterance in which it found none gets a
+        # second listen from Whisper. main.py sets wake_needed (he's asleep,
+        # or his awake time is up, or the robot just heard its wake word) and
+        # has_wake_word (which word counts at the moment).
         self.wake_needed: Callable[[], bool] = lambda: False
+        self.has_wake_word: Callable[[str], bool] = lambda text: strip_wake_word(text)[0]
         self._wake_check = _OneAtATime(Transcriber()) if config.STT_ENGINE == "moonshine" else None
         # DEBUG_STT_COMPARE: the other engine hears each utterance too, on its
         # own thread after this one has passed it on, so replies aren't delayed.
@@ -463,10 +466,10 @@ class Ears:
             t0 = time.time()
             text = self.transcriber.transcribe(utterance)
             print(f"  (turn: {segmenter.last_decision}; {config.STT_ENGINE} transcribed in {time.time() - t0:.2f}s)")
-            if self._wake_check is not None and self.wake_needed() and not strip_wake_word(text)[0]:
+            if self._wake_check is not None and self.wake_needed() and not self.has_wake_word(text):
                 t1 = time.time()
                 second = self._wake_check.transcribe(utterance)
-                if strip_wake_word(second)[0]:
+                if self.has_wake_word(second):
                     print(f"  (wake check: {config.STT_ENGINE} heard {text!r}; whisper heard "
                           f"{second!r} in {time.time() - t1:.2f}s, using that)")
                     text = second

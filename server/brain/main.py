@@ -1001,10 +1001,14 @@ async def start_listening() -> None:
                 on_speech_start=lambda: loop.call_soon_threadsafe(speech_started.set),
             ),
         )
-        # Asleep or out of awake time, he needs his name to answer.
-        # (Not when the robot does the waking: then only audio after its
-        # wake word arrives, and the transcript check is in _handle_heard.)
-        ears.wake_needed = lambda: robot_wake_word is None and time.time() >= awake_until
+        # Asleep or out of awake time, he needs his name to answer. When the
+        # robot does the waking, only audio after its wake word arrives, and
+        # the first transcript must contain that word (_handle_heard); the
+        # ears double-check it with Whisper when Moonshine missed it.
+        ears.wake_needed = lambda: bool(robot_woke_at) or (
+            robot_wake_word is None and time.time() >= awake_until)
+        ears.has_wake_word = lambda text: (
+            _robot_wake_word_in(text) is not None if robot_woke_at else strip_wake_word(text)[0])
         mic = await loop.run_in_executor(None, ears.start)
     except Exception as e:
         ears = None
@@ -1172,6 +1176,11 @@ async def voice_loop() -> None:
             print(f"(voice loop error, ignoring that turn: {e})")
 
 
+def _robot_wake_word_in(text: str) -> re.Match | None:
+    """The robot's wake word in a transcript, with the punctuation after it."""
+    return re.search(rf"\b{re.escape(config.ROBOT_WAKE_WORD)}\b[\s,.!?:;-]*", text, re.IGNORECASE)
+
+
 async def _handle_heard(item: tuple[str, float, float, float]) -> None:
     global awake_until
     global robot_woke_at
@@ -1182,7 +1191,7 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
         # (the robot sends the audio from just before it). The question is
         # whatever follows the word.
         robot_woke_at = 0.0
-        m = re.search(rf"\b{re.escape(config.ROBOT_WAKE_WORD)}\b[\s,.!?:;-]*", text, re.IGNORECASE)
+        m = _robot_wake_word_in(text)
         if m is None:
             await back_to_sleep(f"the robot woke, but \"{text}\" has no \"{config.ROBOT_WAKE_WORD}\" in it")
             return
