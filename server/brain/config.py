@@ -260,6 +260,8 @@ CANCEL_MIN_SPEECH = 0.3
 DEBUG_SAVE_UTTERANCE = ""  # set to "debug/last_utterance.wav" to keep the last thing heard, for mic tuning
 AWAKE_SECONDS = 60.0     # after "hey Rocky" he stays awake; each thing you say
                          # resets this clock, and when it runs out he dozes off
+DOZE_HOLD_SECONDS = 20.0  # ...unless he's hearing speech: then he waits up to this
+                          # much longer for it to end (not forever: music sounds like speech)
 # Speaking up on his own: timers he was asked to set, and warnings about his
 # battery and temperature. He waits for any conversation to finish, opens his
 # eyes to say it, and stays awake to hear your answer. Lines: personality.py.

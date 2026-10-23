@@ -1078,7 +1078,9 @@ async def head_loop() -> None:
 async def doze_loop() -> None:
     """When the awake clock runs out, he nods off on his own (sleepy face,
     no announcement). Saying "hey Rocky" wakes him again."""
+    global awake_until
     was_awake = False
+    held_since = 0.0  # when he started waiting for you to finish, past the clock
     while True:
         await asyncio.sleep(1)
         if robot_woke_at and time.time() - robot_woke_at > config.ROBOT_WAKE_GRACE_SECONDS and not (
@@ -1087,7 +1089,19 @@ async def doze_loop() -> None:
             await back_to_sleep("the robot woke, but nothing followed")
             was_awake = False
             continue
-        awake = time.time() < awake_until
+        now = time.time()
+        if awake_until - now > 5:
+            held_since = 0.0  # a transcript restarted the clock: no hold in progress
+        if was_awake and now >= awake_until and (turn_lock.locked() or (
+                ears is not None and ears.hearing and now - (held_since or now) < config.DOZE_HOLD_SECONDS)):
+            # Not in the middle of a reply, or of you talking. The clock only
+            # restarts when a transcript arrives, which can come back empty or
+            # a moment after you stop, so give it a few seconds at a time.
+            # Music can sound like talking, hence the limit.
+            held_since = held_since or now
+            awake_until = now + 3.0
+            continue
+        awake = now < awake_until
         if was_awake and not awake:
             print(f"({config.ROBOT_NAME} dozed off — say \"hey {config.ROBOT_NAME}\" to wake him)")
             await set_asleep(True)
