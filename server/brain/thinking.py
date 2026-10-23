@@ -11,7 +11,8 @@ the head and comes back with a fresh camera frame from the new angle,
 `track_face` starts/stops following the human, `check_temperature` reads
 his chip's temperature, `set_timer` / `cancel_timer` manage reminders he
 announces himself, `remember` / `forget` keep facts in his long-term
-memory (memories.py), and on a StackChan `check_battery` reads his battery.
+memory (memories.py), `web_search` and `check_weather` look things up
+(web.py, weather.py), and on a StackChan `check_battery` reads his battery.
 main.py supplies the functions that actually do those things; only the
 tools it supplies are offered.
 """
@@ -155,6 +156,38 @@ TOOLS = [
                 "type": "object",
                 "properties": {"about": {"type": "string"}},
                 "required": ["about"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "Look something up on the internet: news, prices, scores, opening hours, people, "
+                "anything current or that you don't know for sure. Ask one clear question in "
+                "plain words, with the place and time when they matter (\"Apple stock price "
+                "today\", \"who won the Seahawks game last night\"). Takes a few seconds. For the "
+                "weather, use check_weather instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"question": {"type": "string"}},
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_weather",
+            "description": (
+                "The weather right now and for the next three days, live. With no place it's for "
+                "your human's home; otherwise name the place (\"Seattle, WA\", \"Paris, France\")."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"place": {"type": "string", "description": "Omit for home."}},
             },
         },
     },

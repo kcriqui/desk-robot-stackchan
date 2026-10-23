@@ -1,5 +1,6 @@
 # Pinned to the versions this was built and tested with (2026-09-05).
 openai==3.8.0            # the chat API OpenRouter / Anthropic / OpenAI all speak
+anthropic==1.13.0        # web search (brain/web.py); only with Anthropic as the provider
 websockets==17.1
 certifi==2026.7.22          # root certs for the Fish Audio call
 faster-whisper==1.2.1   # local speech-to-text

@@ -44,7 +44,7 @@ import time
 
 import websockets
 
-from . import alerts, battery, config, mouth, personality
+from . import alerts, battery, config, mouth, personality, weather, web
 from .memories import Memories
 from .timers import Timers, when
 from .thinking import Interrupted, RobotBrain
@@ -516,6 +516,26 @@ def forget(args: dict) -> tuple[str, bytes | None]:
     return (f"Forgotten: {_listed(gone)}.", None)
 
 
+def web_search(args: dict) -> tuple[str, bytes | None]:
+    question = str(args.get("question") or "").strip()
+    if not question:
+        return ("Search for what? Ask one clear question.", None)
+    print(f"  (searching the web: {question})")
+    try:
+        return (searcher.ask(question), None)
+    except Exception as e:  # network, rate limit, timeout: say so, don't crash the turn
+        print(f"  (web search failed: {e})")
+        return ("The search failed just now (no internet or the search service is busy). Say so.", None)
+
+
+def check_weather(args: dict) -> tuple[str, bytes | None]:
+    try:
+        return (weather.report(str(args.get("place") or "")), None)
+    except (OSError, ValueError, KeyError) as e:  # offline, or an odd reply
+        print(f"  (weather failed: {e})")
+        return ("The weather service didn't answer just now. Say so; don't guess.", None)
+
+
 def check_battery(args: dict) -> tuple[str, bytes | None]:
     if eyes.battery is None:
         return ("No battery reading yet: your body hasn't reported one.", None)
@@ -550,7 +570,10 @@ ABILITIES = {
     "track_face": _sync(lambda args: set_tracking(bool(args.get("on", True)))),
 }
 ABILITIES.update(check_temperature=check_temperature, set_timer=set_timer, cancel_timer=cancel_timer,
-                 remember=remember, forget=forget)
+                 remember=remember, forget=forget, check_weather=check_weather)
+searcher = web.WebSearch() if web.available() else None
+if searcher is not None:  # Anthropic as the provider (web.py)
+    ABILITIES["web_search"] = web_search
 if config.BODY == "stackchan":  # the original body has no battery sensor
     ABILITIES["check_battery"] = check_battery
 
@@ -1293,6 +1316,11 @@ async def main() -> None:
     brain.situation = situation
     brain.memory = memories.prompt
     print(f"long-term memory: {len(memories.facts())} facts in {config.MEMORY_FILE}")
+    print("web search:", "on (Anthropic, ~1 cent a question)" if searcher is not None else
+          "off (needs Anthropic as LLM_BASE_URL and the anthropic package)")
+    home = weather.home()
+    print("home for the weather:", home or (f"{config.HOME_LOCATION!r} not found" if config.HOME_LOCATION
+                                           else "not set (HOME_LOCATION in server/.env)"))
     tracker = Tracker(eyes, lambda p, t, on: loop.call_soon_threadsafe(head_moves.put_nowait, (p, t, on)))
     eyes.has_annotator = True
     tracker.start()

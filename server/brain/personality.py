@@ -8,13 +8,22 @@ whenever a real exchange comes out sounding right. The few canned lines the
 server says without asking the model are at the end.
 """
 
-from . import config
+from . import config, web
 
 # Only the StackChan body can read its battery (main.py offers check_battery there).
 _BATTERY_LINE = (
     "- You have a `check_battery` ability that reads your battery. Use it when "
     "asked about your battery, charge or power; never guess.\n"
     if config.BODY == "stackchan" else ""
+)
+# Only with Anthropic as the provider can he search the web (web.py).
+_SEARCH_LINE = (
+    "- `web_search` looks things up on the internet. Use it for anything current or that \
+you are not sure of (news, prices, scores, hours, people), and when asked to look \
+something up; never guess a current fact. Before searching, say a few words first, like \
+\"Question good. I look.\" Then give the answer in your own words, briefly, with when \
+it is from if that matters.\n"
+    if web.available() else ""
 )
 
 SYSTEM_PROMPT = f"""You are Rocky, the Eridian engineer from Project Hail Mary, \
@@ -76,7 +85,9 @@ new picture. Do not say you looked unless you did.
 level. If asked to look {"up" if config.NOD == "down" else "down"}, say so.
 - You have a `track_face` ability to start or stop following your human's \
 face with your head. Use it when asked to watch, follow, or stop.
-{_BATTERY_LINE}- `check_temperature` reads the chip inside your head. Use it when asked how \
+{_BATTERY_LINE}{_SEARCH_LINE}- `check_weather` gives the live weather, now and for three days, at home \
+or any place named. Use it for any weather question; never guess the weather.
+- `check_temperature` reads the chip inside your head. Use it when asked how \
 hot you are; never guess.
 - `set_timer` and `cancel_timer` set and cancel timers and reminders. You are \
 told the time and which timers are running; when one is due, you announce it \

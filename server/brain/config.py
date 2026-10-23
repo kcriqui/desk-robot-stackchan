@@ -363,6 +363,16 @@ TRACK_LOST_SECONDS = 4.0   # no face this long → idle glances resume
 
 # How many conversation turns to remember before forgetting the oldest.
 MAX_HISTORY_TURNS = 20
+# Looking things up. web_search (web.py) needs Anthropic as the provider and
+# the anthropic package; WEB_SEARCH=0 in server/.env turns it off. Each search
+# costs ~1 cent. check_weather (weather.py) is free.
+WEB_SEARCH = os.environ.get("WEB_SEARCH", "1") != "0"
+SEARCH_MAX_USES = 3        # searches per question, at most
+# Home, for the weather and local searches: "Portland, OR", "Paris, France".
+# Set it in server/.env; with none, he asks where.
+HOME_LOCATION = os.environ.get("HOME_LOCATION", "").strip()
+TEMP_UNIT = "celsius" if os.environ.get("TEMP_UNIT", "").lower().startswith("c") else "fahrenheit"
+
 # Facts he keeps for good (the remember / forget tools; memories.py). The
 # server/data folder is git-ignored.
 MEMORY_FILE = Path(os.environ.get("MEMORY_FILE") or Path(__file__).resolve().parent.parent / "data" / "memories.json")

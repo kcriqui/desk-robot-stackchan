@@ -449,7 +449,10 @@ cd server && python -m unittest tests/test_personality.py tests/test_segmenter.p
 - **What leaves your computer:** each question sends the transcript, the recent
   conversation, your name from `HUMAN_NAME`, and the newest camera frame
   (only for visual questions) to your model provider, and each reply's text
-  to Fish Audio if configured. Speech-to-text and face tracking run
+  to Fish Audio if configured. When he looks something up (Anthropic as the
+  provider only), the question goes to Anthropic's web search; the weather
+  sends the place name and its coordinates to Open-Meteo. Speech-to-text and
+  face tracking run
   locally. The first run downloads speech models from Hugging Face and
   GitHub, pinned to fixed versions. The console page loads nothing from the
   internet.
