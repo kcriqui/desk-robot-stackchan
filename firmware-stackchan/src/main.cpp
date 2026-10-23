@@ -194,7 +194,9 @@ uint8_t demoEmotionIdx = 0;
 
 void printHelp() {
   Serial.println(F("desk-robot (StackChan) commands:"));
-  Serial.println(F("  emo <name>   neutral|happy|sad|angry|surprised|sleepy|thinking"));
+  Serial.println(F("  emo <name>   neutral happy sad angry surprised sleepy thinking"));
+  Serial.println(F("               curious skeptical excited love confused"));
+  Serial.println(F("  still <name>|off  hold one emotion still, to look at it (off: back to life)"));
   Serial.printf("  pan <deg>    turn head, %.0f..%.0f (0 = center, - = its left)\n", PAN_MIN_DEG, PAN_MAX_DEG);
   Serial.printf("  tilt <deg>   tilt head, %.0f (level)..%.0f (up)\n", TILT_MIN_DEG, TILT_MAX_DEG);
   Serial.printf("  center       head straight ahead, tilted %.0f up (rest pose)\n", TILT_REST_DEG);
@@ -240,7 +242,8 @@ void handleCommand(String line) {
       face.setEmotion(e);
       Serial.printf("emotion: %s\n", emotionName(e));
     } else {
-      Serial.println(F("unknown emotion — try: neutral happy sad angry surprised sleepy thinking"));
+      Serial.println(F("unknown emotion — try: neutral happy sad angry surprised sleepy thinking curious "
+                       "skeptical excited love confused"));
     }
   } else if (cmd == "pan") {
     panNeck.setTarget(arg.toFloat());
@@ -360,6 +363,21 @@ void handleCommand(String line) {
     if (arg == "now" && face.asleep() && asleepSinceMs) asleepSinceMs = (millis() - DEEP_SLEEP_AFTER_MS) | 1;
     else if (arg == "off") setDeepSleep(false);
     Serial.printf("deep sleep: %s (asleep on battery only)\n", deepSleep || arg == "now" ? "on" : "off");
+  } else if (cmd == "facepack" || cmd == "facepreview") {
+    // From the brain's `face` message: a face pack, kept in flash unless it's a preview.
+    if (face.applyPackJson(arg.c_str(), cmd == "facepack")) {
+      Serial.printf("face pack: %s%s\n", face.packName(), cmd == "facepack" ? "" : " (preview)");
+    } else {
+      Serial.println(F("face pack: not valid JSON, kept the old one"));
+    }
+  } else if (cmd == "still") {
+    Emotion e;
+    if (arg == "off") {
+      face.setStill(false);
+    } else if (emotionFromName(arg.c_str(), e)) {
+      face.setStill(true, e);
+    }
+    Serial.printf("still: %s\n", arg.c_str());
   } else if (cmd == "clock") {
     if (!arg.isEmpty()) {
       int sp = arg.indexOf(' ');
@@ -462,7 +480,7 @@ void setup() {
   // Tracking streams small moves; re-reading the servo before each one stutters.
   M5StackChan.Motion.setAutoAngleSyncEnabled(false);
 
-  gfx.configure(FACE_COLOR, BACKGROUND_COLOR);
+  gfx.configure(BACKGROUND_COLOR);
   face.begin();
   panNeck.begin(ServoNeck::Axis::Pan, PAN_MIN_DEG, PAN_MAX_DEG, PAN_SPEED,
                 PAN_GLANCE_DEG, PAN_INVERT);
@@ -495,7 +513,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.0 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.1 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN

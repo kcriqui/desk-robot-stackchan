@@ -46,7 +46,8 @@ settle. The server takes either type.
 ## Server → robot
 
 ```json
-{"type": "emotion", "name": "happy"}
+{"type": "emotion", "name": "happy"}   // neutral happy sad angry surprised sleepy thinking; firmware-stackchan
+                                  // 0.6.1+ also curious skeptical excited love confused
 {"type": "pan", "deg": -20}
 {"type": "tilt", "deg": 15}
 {"type": "speak_begin", "bytes": 0}      // binary TTS audio frames follow; bytes = total if known, 0 = streaming (robot starts after 200 ms of audio)
@@ -60,6 +61,8 @@ settle. The server takes either type.
 {"type": "glance", "on": false}   // allow/forbid the firmware's idle head glances; the server sends off on connect and leaves them off
 {"type": "mic", "on": true}       // stream the microphone to the server
 {"type": "stream", "on": true, "fps": 10}   // start/stop the camera stream, set rate
+{"type": "face", "save": true, "pack": {...}}  // firmware-stackchan 0.6.1+: a face pack (server/faces/*.json,
+                                  // minus its description); save = keep it in flash. Sent on connect.
 {"type": "clock", "tz": "PST8PDT,M3.2.0,M11.1.0", "h24": false}  // firmware-stackchan 0.6.0+: the clock screen's
                                   // time zone (POSIX rule) and style; kept in flash. The robot gets the time
                                   // itself (SNTP) and keeps it in its clock chip. Sent on connect.

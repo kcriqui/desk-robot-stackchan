@@ -293,7 +293,9 @@ SLEEP_PHRASES = [        # any of these puts him to sleep until the next "hey <n
 ]
 # What he says as he goes to sleep: personality.py, LINES.
 
-# Emotions the firmware knows how to display (see firmware/src/face.cpp).
+# Emotions the firmware knows how to display: firmware/src/face.cpp's seven on
+# the original body; a StackChan (firmware-stackchan/src/face.cpp, from the
+# original project's V2) adds five.
 EMOTIONS = [
     "neutral",
     "happy",
@@ -303,6 +305,11 @@ EMOTIONS = [
     "sleepy",
     "thinking",
 ]
+if BODY == "stackchan":
+    EMOTIONS += ["curious", "skeptical", "excited", "love", "confused"]
+# Which face pack a StackChan draws (server/faces/<id>.json, or custom/<id>):
+# rocky, bean, blocky or visor. The console can switch until the next restart.
+FACE_PACK = os.environ.get("FACE_PACK", "rocky").strip() or "rocky"
 
 # Camera. The robot streams small JPEGs while connected; the live view
 # is at http://localhost:<LIVE_VIEW_PORT>/ on this computer.

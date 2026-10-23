@@ -4,52 +4,52 @@ void FaceGfx::begin() {
   M5.Display.setRotation(1);  // landscape, 320x240
   M5.Display.fillScreen(M5.Display.color888(bg_ >> 16, (bg_ >> 8) & 0xFF, bg_ & 0xFF));
 
-  // One bit per pixel: 320x160 is 6.4 KB, and the palette paints it on push.
-  canvas_.setColorDepth(1);
-  canvas_.createSprite(edge(FACE_W), edge(FACE_H));
-  canvas_.createPalette();  // colours below are palette indices: 0 = bg, 1 = face
-  canvas_.setPaletteColor(0, bg_);
-  canvas_.setPaletteColor(1, fg_);
-  canvas_.setTextDatum(textdatum_t::baseline_left);  // U8g2 draws strings from the baseline
-  canvas_.setFont(&fonts::Font2);
+  // Four bits a pixel: 320x160 is 25.6 KB (in PSRAM), and the palette paints
+  // it on push.
+  canvas_.setPsram(true);
+  canvas_.setColorDepth(4);
+  canvas_.createSprite(lroundf(FACE_W * SCALE), lroundf(FACE_H * SCALE));
+  canvas_.createPalette();
+  setInk(BG, bg_);
+  setInk(EYE, 0xFFFFFF);
+  setInk(PUPIL, 0x0A0C12);
+  setInk(SHINE, 0xFFFFFF);
+  setInk(BLUSH, 0xFF7AA8);
+  setInk(TEAR, 0x7AC8FF);
+  setInk(HEART, 0xFF4A6A);
+  setInk(STEAM, 0xFF8A3A);
   bandY_ = (M5.Display.height() - canvas_.height()) / 2;
 }
 
-void FaceGfx::clearBuffer() { canvas_.fillSprite(0); }
-
-void FaceGfx::sendBuffer() { canvas_.pushSprite(0, bandY_); }
-
-void FaceGfx::drawBox(int x, int y, int w, int h) {
-  if (w <= 0 || h <= 0) return;
-  canvas_.fillRect(edge(x), edge(y), edge(x + w) - edge(x), edge(y + h) - edge(y), color_);
+void FaceGfx::span(int y, int x0, int x1, uint8_t ink) {
+  if (y < 0 || y >= static_cast<int>(canvas_.height())) return;
+  x0 = max(x0, 0);
+  x1 = min(x1, static_cast<int>(canvas_.width()));
+  if (x1 > x0) canvas_.drawFastHLine(x0, y, x1 - x0, ink);
 }
 
-void FaceGfx::drawRBox(int x, int y, int w, int h, int r) {
-  if (w <= 0 || h <= 0) return;
-  canvas_.fillRoundRect(edge(x), edge(y), edge(x + w) - edge(x), edge(y + h) - edge(y),
-                        edge(r), color_);
+void FaceGfx::fillRect(int x, int y, int w, int h, uint8_t ink) {
+  if (w > 0 && h > 0) canvas_.fillRect(x, y, w, h, ink);
 }
 
-void FaceGfx::drawDisc(int x, int y, int r) {
-  // A U8g2 disc of radius r covers 2r+1 pixels across.
-  canvas_.fillCircle(lroundf(mid(x)), lroundf(mid(y)), lroundf((r + 0.5f) * SCALE), color_);
+void FaceGfx::fillCircle(float cx, float cy, float r, uint8_t ink) {
+  if (r <= 0) return;
+  // Row by row from the exact circle, so a small one isn't lumpy.
+  int y0 = static_cast<int>(floorf(cy - r)), y1 = static_cast<int>(ceilf(cy + r));
+  for (int y = y0; y <= y1; ++y) {
+    float dy = y + 0.5f - cy;
+    float half2 = r * r - dy * dy;
+    if (half2 <= 0) continue;
+    float half = sqrtf(half2);
+    span(y, static_cast<int>(lroundf(cx - half)), static_cast<int>(lroundf(cx + half)), ink);
+  }
 }
 
-void FaceGfx::drawTriangle(int x0, int y0, int x1, int y1, int x2, int y2) {
-  canvas_.fillTriangle(lroundf(mid(x0)), lroundf(mid(y0)), lroundf(mid(x1)), lroundf(mid(y1)),
-                       lroundf(mid(x2)), lroundf(mid(y2)), color_);
-}
-
-void FaceGfx::drawLine(int x0, int y0, int x1, int y1) {
-  // A one-face-pixel line is SCALE screen pixels wide: a filled quad (two
-  // triangles). Not drawWideLine: that one anti-aliases by reading pixels
-  // back, which crashes on a 1-bit palette canvas.
-  float ax = mid(x0), ay = mid(y0), bx = mid(x1), by = mid(y1);
+void FaceGfx::line(float ax, float ay, float bx, float by, float hw, uint8_t ink) {
   float dx = bx - ax, dy = by - ay;
   float len = sqrtf(dx * dx + dy * dy);
-  float hw = SCALE / 2;
   if (len < 0.01f) {
-    canvas_.fillCircle(lroundf(ax), lroundf(ay), lroundf(hw), color_);
+    fillCircle(ax, ay, hw, ink);
     return;
   }
   float nx = -dy / len * hw, ny = dx / len * hw;  // half-width, across the line
@@ -57,13 +57,6 @@ void FaceGfx::drawLine(int x0, int y0, int x1, int y1) {
   int p1x = lroundf(ax - nx), p1y = lroundf(ay - ny);
   int p2x = lroundf(bx - nx), p2y = lroundf(by - ny);
   int p3x = lroundf(bx + nx), p3y = lroundf(by + ny);
-  canvas_.fillTriangle(p0x, p0y, p1x, p1y, p2x, p2y, color_);
-  canvas_.fillTriangle(p0x, p0y, p2x, p2y, p3x, p3y, color_);
-}
-
-void FaceGfx::drawStr(int x, int y, const char* s) {
-  // Font2 is 16 px tall; size it to the requested face-pixel height.
-  canvas_.setTextSize(fontH_ * SCALE / 16.0f);
-  canvas_.setTextColor(color_);
-  canvas_.drawString(s, edge(x), edge(y));
+  canvas_.fillTriangle(p0x, p0y, p1x, p1y, p2x, p2y, ink);
+  canvas_.fillTriangle(p0x, p0y, p2x, p2y, p3x, p3y, ink);
 }

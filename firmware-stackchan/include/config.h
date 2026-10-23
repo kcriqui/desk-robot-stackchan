@@ -72,8 +72,9 @@ constexpr bool CAMERA_HMIRROR = false;
 constexpr float SPEAKER_VOLUME = 0.7f;  // 0.0-1.0
 
 // ─── Face ────────────────────────────────────────────────────────────────────
-constexpr uint32_t FACE_COLOR = 0xFFFFFF;        // RGB888
-constexpr uint32_t BACKGROUND_COLOR = 0x000000;
+// The face's colours come from its face pack (server/faces/*.json, sent by
+// the brain and kept in flash; Rocky's own until then).
+constexpr uint32_t BACKGROUND_COLOR = 0x000000;  // RGB888
 
 // ─── Power (on battery) ──────────────────────────────────────────────────────
 // The body's battery is only 550 mAh. Asleep on battery for this long, he

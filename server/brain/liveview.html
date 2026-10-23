@@ -197,7 +197,7 @@
         </div>
       </div>
       <div class="card">
-        <h2 class="label"><span>Face</span></h2>
+        <h2 class="label"><span>Face</span><span class="sub"><select id="facepack" aria-label="face pack" hidden></select></span></h2>
         <div class="faces" id="faces"></div>
         <div class="row" style="margin-top:10px"><button data-act="dance">Dance</button></div>
       </div>
@@ -244,7 +244,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const NAME = "{name}";
-  const EMOTIONS = ["neutral", "happy", "sad", "angry", "surprised", "sleepy", "thinking"];
+  let EMOTIONS = ["neutral", "happy", "sad", "angry", "surprised", "sleepy", "thinking"];  // the brain's list replaces it
   const TUNES = [
     { key: "VAD_THRESHOLD",    name: "Hears speech above",   help: "lower = more sensitive",            min: 0.1, max: 0.95, step: 0.05 },
     { key: "TURN_THRESHOLD",   name: "Sure you're finished", help: "raise if he cuts you off",          min: 0.1, max: 0.95, step: 0.05 },
@@ -280,10 +280,26 @@
 
   // ── controls ───────────────────────────────────────────────────────────
   const faces = $("faces");
-  for (const e of EMOTIONS) {
-    const b = document.createElement("button"); b.textContent = e; b.dataset.emotion = e;
-    b.onclick = () => act("emotion", { name: e });
-    faces.appendChild(b);
+  function faceButtons(list) {
+    EMOTIONS = list; faces.replaceChildren();
+    for (const e of EMOTIONS) {
+      const b = document.createElement("button"); b.textContent = e; b.dataset.emotion = e;
+      b.onclick = () => act("emotion", { name: e });
+      faces.appendChild(b);
+    }
+  }
+  faceButtons(EMOTIONS);
+  $("facepack").onchange = () => act("face", { id: $("facepack").value }, "Face pack: " + $("facepack").value);
+  let packsShown = "";
+  function showPacks(list, current) {   // a StackChan's face packs (server/faces/)
+    const sel = $("facepack");
+    sel.hidden = !list || !list.length;
+    const key = JSON.stringify(list);
+    if (key !== packsShown) {
+      packsShown = key; sel.replaceChildren();
+      for (const id of list || []) { const o = document.createElement("option"); o.value = o.textContent = id; sel.appendChild(o); }
+    }
+    if (current && document.activeElement !== sel) sel.value = current;
   }
   let headTimer;
   function headChanged() {
@@ -381,9 +397,19 @@
 
   // ── status loop ────────────────────────────────────────────────────────
   let lastSeq = -1;
+  let brainStarted = null;
   async function tick() {
     try {
       const s = await (await fetch("/status")).json();
+      // The brain restarted: it may serve a newer page, so load it (not while
+      // something is typed in a box, which a reload would lose).
+      if (s.brain_started) {
+        if (brainStarted === null) brainStarted = s.brain_started;
+        else if (s.brain_started !== brainStarted && !$("saytext").value && !$("memtext").value) {
+          location.reload();
+          return;
+        }
+      }
       status = s;
       const linked = !!s.robot;
       $("linkdot").className = "dot" + (linked ? " on" : "");
@@ -423,6 +449,8 @@
       if (!dragging.has("pan")) { $("pan").value = Math.round(pan); $("panv").textContent = Math.round(pan) + "°"; }
       if (!dragging.has("tilt")) { $("tilt").value = Math.round(tilt); $("tiltv").textContent = Math.round(tilt) + "°"; }
       if (s.volume != null && document.activeElement !== $("vol")) { $("vol").value = s.volume; $("volv").textContent = (+s.volume).toFixed(2); }
+      if (s.emotions && s.emotions.join() !== EMOTIONS.join()) faceButtons(s.emotions);
+      showPacks(s.face_packs, s.face_pack);
       for (const b of faces.children) b.classList.toggle("active", b.dataset.emotion === s.emotion);
       $("trackbtn").classList.toggle("active", !!s.tracking_enabled);
       $("trackbtn").textContent = s.tracking_enabled ? "Stop following" : "Follow my face";

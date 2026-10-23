@@ -44,7 +44,7 @@ import time
 
 import websockets
 
-from . import alerts, battery, clock, config, mouth, personality, weather, web
+from . import alerts, battery, clock, config, faces, mouth, personality, weather, web
 from .body import Body
 from .dance import Dancer, length as dance_length
 from .memories import Memories
@@ -57,6 +57,7 @@ from .tracker import Tracker
 robot_socket: websockets.ServerConnection | None = None
 robot_peer = ""          # the connected robot's address
 robot_fw = (0, 0, 0)     # its firmware version, from the hello
+face_pack = config.FACE_PACK  # the face pack he wears (server/faces/); the console can switch it
 robot_heard_at = 0.0     # when it last sent anything (it sends something every few seconds)
 _greeting = 0            # connections waiting to say hello
 MAX_GREETING = 8         # more than this at once is a flood: refused at once
@@ -232,6 +233,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     # No idle head glances: they fight deliberate looks. The eyes still move.
     await send_to_robot({"type": "glance", "on": False})
     asyncio.create_task(send_clock())  # the clock screen's time zone and weather (fetched: don't hold up the link)
+    await send_face_pack()
     try:
         async for message in websocket:
             if websocket is robot_socket:
@@ -344,6 +346,13 @@ async def handle_console_line(line: str) -> bool:
             await set_volume(float(arg))
         except ValueError:
             print("usage: volume <0.0-1.0>")
+    elif cmd == "face":
+        global face_pack
+        ids = [p["id"] for p in faces.list_packs() if "error" not in p]
+        if arg in ids:
+            face_pack = arg
+            await send_face_pack()
+        print(f"face pack: {face_pack} (of {', '.join(ids)}; FACE_PACK in server/.env keeps one)")
     elif cmd == "dance":
         print(f"dancing: {start_dance(arg or None)}" if robot_socket is not None else "no robot connected")
     elif cmd == "gesture":
@@ -366,7 +375,7 @@ async def handle_console_line(line: str) -> bool:
     elif cmd == "forget":
         print(forget({"about": arg})[0] if arg else "usage: forget <words | #number | all>")
     else:
-        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | dance [name] | gesture <emotion> | memories | remember <fact> | forget <words|#|all> | poweroff | status | quit")
+        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | face [pack] | dance [name] | gesture <emotion> | memories | remember <fact> | forget <words|#|all> | poweroff | status | quit")
     return True
 
 
@@ -979,6 +988,18 @@ async def set_volume(level: float) -> None:
 
 # ── The live-view console (http://localhost:8766) ────────────────────────────
 
+BRAIN_STARTED = time.time()  # the live view reloads itself when this changes: a restarted brain may serve a new page
+_packs_cache: tuple[float, list[dict]] = (0.0, [])
+
+
+def face_packs() -> list[dict]:
+    """The usable face packs, re-read at most every 10 s (the live view asks five times a second)."""
+    global _packs_cache
+    if time.time() - _packs_cache[0] > 10:
+        _packs_cache = (time.time(), [p for p in faces.list_packs() if "error" not in p])
+    return _packs_cache[1]
+
+
 def console_state() -> dict:
     """Extra fields for /status: everything the page shows beyond the camera."""
     now = time.time()
@@ -1001,6 +1022,10 @@ def console_state() -> dict:
         "tuning": {k: getattr(config, k) for k in TUNABLE},
         "battery_ma": eyes.battery.milliamps if eyes.battery is not None else None,
         "deep_sleep": robot_socket is not None and robot_deep_sleep,
+        "brain_started": BRAIN_STARTED,
+        "emotions": config.EMOTIONS,
+        "face_pack": face_pack if config.BODY == "stackchan" else None,
+        "face_packs": [p["id"] for p in face_packs()] if config.BODY == "stackchan" else [],
         "wake_word": robot_wake_word,  # the robot's own ("computer"), or None: his name wakes him
         "powered_off": ({"why": powered_off[0], "at": time.strftime("%H:%M", time.localtime(powered_off[1]))}
                         if powered_off is not None and robot_socket is None else None),
@@ -1093,6 +1118,14 @@ async def _console_command(action: str, payload: dict) -> dict:
         value = _number(payload, "value", *VOICE_TUNABLE[key])
         setattr(config, key, value)
         print(f"console: {key} = {value:g} (until restart; set it in config.py to keep)")
+    elif action == "face":
+        global face_pack
+        pid = str(payload.get("id", ""))
+        if pid not in [p["id"] for p in face_packs()]:
+            raise ValueError("no such face pack")
+        face_pack = pid
+        await send_face_pack()
+        print(f"console: face pack {pid}")
     elif action == "dance":
         picked = start_dance(payload.get("name"))
         if picked is None:
@@ -1322,6 +1355,15 @@ async def send_clock() -> None:
         return
     await send_to_robot({"type": "clock", "tz": clock.posix_tz(), "h24": config.CLOCK_24H})
     await send_weather()
+
+
+async def send_face_pack() -> None:
+    """His face pack, which the robot keeps in flash (StackChan firmware 0.6.1+)."""
+    global face_pack
+    if robot_socket is None or robot_fw < (0, 6, 1):
+        return
+    face_pack, pack = faces.load_or_default(face_pack)
+    await send_to_robot(faces.robot_message(pack))
 
 
 async def send_weather() -> None:

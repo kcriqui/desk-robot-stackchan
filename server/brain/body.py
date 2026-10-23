@@ -29,8 +29,8 @@ from collections.abc import Awaitable, Callable
 
 from . import config
 
-# Offsets in head degrees (pan + = Rocky's right, tilt + = up) and how long to hold each before the next. Emotions the
-# robot's face doesn't have yet (excited, curious, ...) are here for when it does.
+# Offsets in head degrees (pan + = Rocky's right, tilt + = up) and how long to hold each before the next. The original
+# body's face lacks the last five emotions (curious ... confused); a StackChan's has them.
 GESTURES: dict[str, list[tuple[float, float, float]]] = {
     "happy":     [(0, 5, 0.18), (0, 0, 0.14), (0, 4, 0.16)],                      # a little bounce
     "excited":   [(-5, 6, 0.16), (5, 1, 0.16), (-4, 6, 0.16), (4, 1, 0.16)],     # bouncy wiggle
