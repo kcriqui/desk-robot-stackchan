@@ -291,6 +291,18 @@ _NAMES_ALT = "|".join(r"\W+".join(map(re.escape, n.split())) for n in config.NAM
 _NAME_FIRST_RE = re.compile(rf"^\W*(?:{_NAMES_ALT})\b[\s,.!?:;-]*", re.IGNORECASE)
 
 
+def strip_leading_word(text: str, word: str, loose: bool = False) -> str:
+    """The text without the robot's wake word at its start, however many times
+    it's there ("Computer computer, what time is it?" -> "what time is it?":
+    Moonshine sometimes repeats a lone word). Only when the word stands apart
+    (punctuation, the end, or the word again after it), so "computer games
+    are fun" keeps its word; loose: any word boundary (right after the robot
+    heard it, the word is surely the wake word)."""
+    w = re.escape(word)
+    after = r"\b[\s,.!?:;-]*" if loose else rf"\b(?:\s*[,.!?:;-]+\s*|\s*$|\s+(?={w}\b))"
+    return re.sub(rf"^\W*(?:{w}{after})+", "", text, flags=re.IGNORECASE).strip()
+
+
 def strip_wake_word(text: str) -> tuple[bool, str]:
     """('Hey Rocky, what's 9 times 16?') -> (True, "what's 9 times 16?").
     The question keeps its digits, punctuation and case — the brain needs

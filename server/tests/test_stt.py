@@ -29,6 +29,8 @@ class CollapseRepeatsTests(unittest.TestCase):
         self.assertEqual(c("Go to sleep. Go to sleep."), "Go to sleep.")
         self.assertEqual(c("Go to sleep go to sleep go to"), "Go to sleep")
         self.assertEqual(c("Computer computer computer computer computer"), "Computer")
+        self.assertEqual(c("Computer computer"), "Computer")          # the robot's wake word, even twice
+        self.assertEqual(c("Computer computer computer"), "Computer")
 
     def test_real_repeats_are_kept(self):
         c = moonshine.collapse_repeats

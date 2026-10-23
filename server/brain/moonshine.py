@@ -100,11 +100,13 @@ def collapse_repeats(text: str) -> str:
     go to sleep" for "go to sleep" (seen 4 times in ~60 utterances; Whisper
     heard each once), sometimes stopping partway through a copy. A
     transcript that is one phrase of 2+ different words said 2+ times
-    becomes one copy. One repeated word ("Rocky rocky rocky") is left alone:
-    people say that."""
+    becomes one copy. One repeated word ("Rocky rocky rocky") is left alone,
+    since people say that, unless it's 4+ copies or the robot's wake word: a
+    lone "Computer." often comes out as "Computer computer (computer)"
+    (Whisper heard each once), and nobody says that."""
     words = text.split()
     key = [w.strip(".,!?;:").lower() for w in words]
-    if len(words) >= 4 and len(set(key)) == 1:
+    if len(set(key)) == 1 and (len(words) >= 4 or (len(words) >= 2 and key[0] == config.ROBOT_WAKE_WORD)):
         return words[0].rstrip(",;:")  # "Computer computer ... computer" (x7, from one "Computer.")
     for size in range(2, len(words) // 2 + 1):
         # whole copies, then maybe a cut-off one: "go to sleep go to sleep go to"

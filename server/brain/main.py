@@ -50,7 +50,7 @@ from .dance import Dancer, length as dance_length
 from .memories import Memories
 from .timers import Timers, when
 from .thinking import Interrupted, RobotBrain
-from .ears import Ears, is_command, normalize, strip_wake_word
+from .ears import Ears, is_command, normalize, strip_leading_word, strip_wake_word
 from .eyes import Eyes
 from .tracker import Tracker
 
@@ -1420,7 +1420,14 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
         if m is None:
             await back_to_sleep(f"the robot woke, but \"{text}\" has no \"{config.ROBOT_WAKE_WORD}\" in it")
             return
-        woke, question = True, text[m.end():].strip()
+        # The question is what follows, without the word again ("Computer computer, ...").
+        woke, question = True, strip_leading_word(text[m.end():], config.ROBOT_WAKE_WORD, loose=True)
+    elif robot_wake_word:
+        # Already awake, "Computer, what's ...": the model needn't hear the word, and "Computer" alone is a bare
+        # wake ("Question?"), not a question about computers.
+        rest = strip_leading_word(text, config.ROBOT_WAKE_WORD)
+        if rest != text.strip():
+            woke, question = True, rest
     # Judge the follow-up window by when you STARTED talking, not by when
     # the transcript arrived — long sentences shouldn't time out.
     if not woke and started_at >= awake_until:
@@ -1433,7 +1440,7 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
         # You started talking just before he dozed off, so he's answering:
         # open his eyes. (A wake word opens them below, with the wake pose.)
         await set_asleep(False)
-    norm = normalize(text)
+    norm = normalize(question if woke else text)  # "Computer, go to sleep" is the sleep command
     lines = personality.LINES
     # Shortcuts, answered without asking the model, only when the phrase is
     # (nearly) all that was said. Anything else goes to the model as usual.

@@ -6,7 +6,7 @@ import unittest
 
 from brain import alerts, config, personality
 from brain.battery import Reading
-from brain.ears import is_command, normalize
+from brain.ears import is_command, normalize, strip_leading_word
 from brain.timers import Timers, when
 
 
@@ -155,6 +155,26 @@ class LineTests(unittest.TestCase):
                     "battery_saved", "hot", "very_hot", "power_off_idle", "power_off_idle_timers",
                     "power_off_battery"):
             personality.LINES[key].format(about="tea", percent=8, minutes=12, temp=72)
+
+
+class RobotWakeWordTests(unittest.TestCase):
+    """The robot's wake word never reaches the model (ears.strip_leading_word)."""
+
+    def test_repeats_and_punctuation_go(self):
+        s = lambda t: strip_leading_word(t, "computer")
+        self.assertEqual(s("Computer computer computer"), "")   # Moonshine repeating a lone word
+        self.assertEqual(s("Computer, how is your battery now?"), "how is your battery now?")
+        self.assertEqual(s("Computer computer, what time is it?"), "what time is it?")
+        self.assertEqual(s("Computer."), "")
+
+    def test_the_word_in_a_sentence_stays(self):
+        s = lambda t: strip_leading_word(t, "computer")
+        self.assertEqual(s("computer games are fun"), "computer games are fun")
+        self.assertEqual(s("And computer."), "And computer.")
+        self.assertEqual(s("is my computer on"), "is my computer on")
+
+    def test_loose_right_after_the_robot_heard_it(self):
+        self.assertEqual(strip_leading_word("Computer how is it", "computer", loose=True), "how is it")
 
 
 class CommandTests(unittest.TestCase):
