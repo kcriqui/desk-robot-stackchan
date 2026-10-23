@@ -199,6 +199,7 @@
       <div class="card">
         <h2 class="label"><span>Face</span></h2>
         <div class="faces" id="faces"></div>
+        <div class="row" style="margin-top:10px"><button data-act="dance">Dance</button></div>
       </div>
       <div class="card">
         <h2 class="label"><span>Voice</span></h2>
@@ -305,6 +306,7 @@
   $("sayform").onsubmit = ev => { ev.preventDefault(); const t = $("saytext").value.trim(); if (t) { act("say", { text: t }, "Saying it"); $("saytext").value = ""; } };
   document.querySelector('[data-act=ask]').onclick = () => { const t = $("saytext").value.trim(); if (t) { act("ask", { text: t }, "Asked " + NAME); $("saytext").value = ""; } };
   $("memform").onsubmit = ev => { ev.preventDefault(); const t = $("memtext").value.trim(); if (t) { act("remember", { text: t }, "Remembered"); $("memtext").value = ""; } };
+  document.querySelector('[data-act=dance]').onclick = () => act("dance", {}, NAME + " is dancing");
   document.querySelector('[data-act=wake]').onclick = () => act("sleep", { on: false }, NAME + " is awake");
   document.querySelector('[data-act=sleep]').onclick = () => act("sleep", { on: true }, NAME + " is asleep");
 

@@ -12,7 +12,8 @@ the head and comes back with a fresh camera frame from the new angle,
 his chip's temperature, `set_timer` / `cancel_timer` manage reminders he
 announces himself, `remember` / `forget` keep facts in his long-term
 memory (memories.py), `web_search` and `check_weather` look things up
-(web.py, weather.py), and on a StackChan `check_battery` reads his battery.
+(web.py, weather.py), `dance` dances (dance.py), and on a StackChan
+`check_battery` reads his battery.
 main.py supplies the functions that actually do those things; only the
 tools it supplies are offered.
 """
@@ -37,8 +38,10 @@ _EMOTION_TAG = re.compile(r"^\s*\[(\w+)\]\s*", re.S)
 # "just... clear answer." is one sentence, not two.
 _SENTENCE_END = re.compile(r"(?<=[!?])\s+|(?<=[^.]\.)\s+")
 
-# An action returns (text for the model, optional fresh camera JPEG).
-Action = Callable[[dict], tuple[str, bytes | None]]
+# An action returns (text for the model, optional fresh camera JPEG), and may add
+# True as a third item: done, the turn ends there with no more words from the
+# model (a dance speaks for itself).
+Action = Callable[[dict], tuple]
 
 # The neck tilts one way from level: down on the original build, up on a
 # StackChan (config.BODY).
@@ -189,6 +192,17 @@ TOOLS = [
                 "type": "object",
                 "properties": {"place": {"type": "string", "description": "Omit for home."}},
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "dance",
+            "description": (
+                "Dance: one of your four short head-dance routines (about 15 s), picked at random. Use it when "
+                "asked to dance. Say a short line first (\"Dance time!\"); after it you say nothing more."
+            ),
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -481,6 +495,7 @@ class RobotBrain:
                     ],
                 })
                 fresh: bytes | None = None
+                done = False
                 for _, c in sorted(calls.items()):
                     if cancelled.is_set():
                         raise Interrupted()
@@ -490,13 +505,17 @@ class RobotBrain:
                         text = f"unknown ability {c['name']}"
                     else:
                         try:
-                            text, img = action(args)
+                            result = action(args)
+                            text, img = result[0], result[1]
+                            done = done or (len(result) > 2 and bool(result[2]))
                         except Exception as e:  # the robot didn't cooperate; say so
                             text, img = f"could not do that: {e}", None
                         if img:
                             fresh = img
                     print(f"  [{c['name']} {args} -> {text}]")
                     turn.append({"role": "tool", "tool_call_id": c["id"], "content": text})
+                if done:
+                    return  # the action is the answer (his lead-in, if any, was already said)
                 if fresh is not None:
                     turn.append({
                         "role": "user",

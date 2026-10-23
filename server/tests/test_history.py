@@ -93,6 +93,15 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual([m["role"] for m in fixed], ["user", "user", "assistant", "tool"])
         self.assertEqual(fixed[-1]["tool_call_id"], "z")
 
+    def test_a_done_action_ends_the_turn(self):
+        """A dance answers by itself: no second model call, and the history stays valid."""
+        b = brain_with({"look": lambda args: ("Dancing now.", None, True)})
+        said = list(b.reply("Dance for me"))
+        self.assertEqual(len(b.client.requests), 1)
+        self.assertEqual(said, [])
+        self.assertEqual([m["role"] for m in b.history], ["user", "assistant", "tool"])
+        self.assertEqual(thinking._repair(b.history), b.history)
+
     def test_long_term_memory_reaches_the_model_at_once(self):
         """What he remembers is in the system prompt of every request, and a
         fact kept during a turn is there for the very next call."""

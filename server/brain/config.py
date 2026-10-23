@@ -372,6 +372,10 @@ if BODY == "stackchan":
     NOD = "up"
 TRACK_LOST_SECONDS = 4.0   # no face this long → idle glances resume
 
+# Body language (body.py): small head moves with his emotion while he talks, and a
+# glance up while he thinks. Off = he keeps his head still while talking.
+BODY_LANGUAGE = True
+
 # How many conversation turns to remember before forgetting the oldest.
 MAX_HISTORY_TURNS = 20
 # Looking things up. web_search (web.py) needs Anthropic as the provider and

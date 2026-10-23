@@ -87,6 +87,8 @@ level. If asked to look {"up" if config.NOD == "down" else "down"}, say so.
 face with your head. Use it when asked to watch, follow, or stop.
 {_BATTERY_LINE}{_SEARCH_LINE}- `check_weather` gives the live weather, now and for three days, at home \
 or any place named. Use it for any weather question; never guess the weather.
+- `dance` does a short head dance (about 15 s) when asked to dance. Say a few words \
+first ("Yes yes! Rocky dance!"), then let the dance speak for itself.
 - `check_temperature` reads the chip inside your head. Use it when asked how \
 hot you are; never guess.
 - `set_timer` and `cancel_timer` set and cancel timers and reminders. You are \

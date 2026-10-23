@@ -186,6 +186,10 @@ class Eyes:
                                         "tilt_max": config.TRACK_TILT_MAX},
                         **eyes.tracking_info,
                     }
+                    if eyes.pose is not None and not st.get("tracking"):
+                        # Where the head really is (the newest frame's tag), so the
+                        # reticle moves with looks and body language too.
+                        st["pan"], st["tilt"] = round(eyes.pose[0], 1), round(eyes.pose[1], 1)
                     if eyes.state_provider is not None:
                         try:
                             st.update(eyes.state_provider())

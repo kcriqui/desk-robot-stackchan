@@ -45,6 +45,8 @@ import time
 import websockets
 
 from . import alerts, battery, config, mouth, personality, weather, web
+from .body import Body
+from .dance import Dancer, length as dance_length
 from .memories import Memories
 from .timers import Timers, when
 from .thinking import Interrupted, RobotBrain
@@ -73,6 +75,8 @@ turn_lock = asyncio.Lock()
 camera_boost = 0  # looks in progress, which want full-rate frames
 last_visual_at = 0.0  # when a question last came with a picture, or he last used `look`
 timers = Timers()
+body: Body | None = None      # small head moves while he talks (body.py)
+dancer: Dancer | None = None  # his four head dances (dance.py)
 memories = Memories(config.MEMORY_FILE)
 said_unasked: list[tuple[float, str]] = []  # (when, what) he said on his own, newest last
 
@@ -99,6 +103,8 @@ async def send_to_robot(payload: dict) -> bool:
     global current_emotion
     if payload.get("type") == "emotion":
         current_emotion = payload.get("name", current_emotion)
+        if body is not None:
+            body.feel(current_emotion)
     if robot_socket is None:
         print("(no robot connected — command not sent)")
         return False
@@ -299,6 +305,14 @@ async def handle_console_line(line: str) -> bool:
             await set_volume(float(arg))
         except ValueError:
             print("usage: volume <0.0-1.0>")
+    elif cmd == "dance":
+        print(f"dancing: {start_dance(arg or None)}" if robot_socket is not None else "no robot connected")
+    elif cmd == "gesture":
+        if body is None or arg not in config.EMOTIONS:
+            print(f"usage: gesture <{'|'.join(config.EMOTIONS)}>")
+        else:
+            await send_to_robot({"type": "emotion", "name": arg})
+            body.test(arg)
     elif cmd == "poweroff":
         if robot_socket is None:
             print("no robot connected")
@@ -313,7 +327,7 @@ async def handle_console_line(line: str) -> bool:
     elif cmd == "forget":
         print(forget({"about": arg})[0] if arg else "usage: forget <words | #number | all>")
     else:
-        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | memories | remember <fact> | forget <words|#|all> | poweroff | status | quit")
+        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | dance [name] | gesture <emotion> | memories | remember <fact> | forget <words|#|all> | poweroff | status | quit")
     return True
 
 
@@ -346,6 +360,16 @@ async def fresh_frame(timeout: float = 2.0) -> bytes | None:
 
 
 async def look(args: dict) -> tuple[str, bytes | None]:
+    """Body language holds still while he looks (and talks about it)."""
+    if dancer is not None:
+        dancer.stop()
+    if body is None:
+        return await _look(args)
+    async with body.hold():
+        return await _look(args)
+
+
+async def _look(args: dict) -> tuple[str, bytes | None]:
     """Move the head, wait for it to get there, and grab a fresh frame.
     Only the axis that was asked for moves: "left"/"right" pan, "down"/"up"/
     "level" tilt (whichever this body's neck can do), "center" both, "here"
@@ -437,6 +461,11 @@ async def set_asleep(on: bool) -> None:
     waking resumes it."""
     global robot_asleep, resume_tracking
     robot_asleep = on
+    if on:
+        if body is not None:
+            body.stop()
+        if dancer is not None:
+            dancer.stop()
     if on and tracker is not None and tracker.enabled:
         await set_tracking(False, announce=False)
         resume_tracking = True
@@ -545,6 +574,38 @@ def check_weather(args: dict) -> tuple[str, bytes | None]:
         return ("The weather service didn't answer just now. Say so; don't guess.", None)
 
 
+def start_dance(name: str | None = None) -> str | None:
+    """One of his four routines, at random (or by name); it starts once his line is said. The routine's name, or
+    None with no robot to dance."""
+    global awake_until
+    if dancer is None or robot_socket is None:
+        return None
+    picked = dancer.start(name)
+    awake_until = max(awake_until, time.time() + dance_length(picked) + config.AWAKE_SECONDS)  # no dozing mid-dance
+    return picked
+
+
+async def dance(args: dict) -> tuple:
+    """The `dance` ability. Done: nothing more for the model to say about it."""
+    picked = start_dance()
+    if picked is None:
+        return ("No body connected: can't dance right now.", None)
+    return (f"Dancing now ({picked}, about {dance_length(picked):.0f} s). Your line before it was enough: say "
+            "nothing more, and don't describe the dance.", None, True)
+
+
+async def _before_dancing() -> None:
+    """The dance has the head: he's awake (the console's Dance button can start one while he sleeps), body language
+    stops, face tracking goes off, no held pose."""
+    if robot_asleep:
+        await set_asleep(False)
+    if body is not None:
+        body.stop()
+    if tracker is not None and tracker.enabled:
+        await set_tracking(False, announce=False)
+    await set_head_held(False)
+
+
 def check_battery(args: dict) -> tuple[str, bytes | None]:
     if eyes.battery is None:
         return ("No battery reading yet: your body hasn't reported one.", None)
@@ -557,6 +618,8 @@ async def set_tracking(on: bool, announce: bool = True) -> tuple[str, bytes | No
     if tracker is None:
         return ("no tracker running", None)
     tracker.enabled = on
+    if on and body is not None:
+        body.stop()
     if not on and tracker.tracking:
         tracker.tracking = False
         eyes.tracking_info = {"tracking": False, "pan": tracker.pan, "tilt": tracker.tilt}
@@ -577,6 +640,7 @@ main_loop: asyncio.AbstractEventLoop | None = None
 ABILITIES = {
     "look": _sync(look),
     "track_face": _sync(lambda args: set_tracking(bool(args.get("on", True)))),
+    "dance": _sync(dance),
 }
 ABILITIES.update(check_temperature=check_temperature, set_timer=set_timer, cancel_timer=cancel_timer,
                  remember=remember, forget=forget, check_weather=check_weather)
@@ -713,6 +777,8 @@ class SpokenReply:
             return True  # nothing to say
         if ears is not None:
             ears.muted.set()
+        if body is not None:
+            body.speaking(current_emotion)  # the reply's emotion is on his face by now
         try:
             if robot_socket is not None:
                 await self._play_robot(first)
@@ -721,6 +787,8 @@ class SpokenReply:
         finally:
             if ears is not None:
                 ears.muted.clear()
+            if body is not None:
+                body.quiet()
         self.tl.mark("done")
         return True
 
@@ -799,6 +867,8 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
         print("  (camera has no fresh frame — telling him he can't see right now)")
     reply = SpokenReply(loop, tl)
     reply.think_and_speak(question, jpeg, camera_wanted)
+    if body is not None:
+        body.ponder()  # a glance up while he thinks
     global thinking
     thinking = True
     try:
@@ -809,6 +879,8 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
     finally:
         thinking = False
     if not finished:
+        if body is not None:
+            body.quiet()
         print("  (you kept talking — Rocky will hear the rest and answer once)")
         await send_to_robot({"type": "emotion", "name": "neutral"})
         return False
@@ -922,6 +994,10 @@ async def _console_command(action: str, payload: dict) -> dict:
             raise ValueError(f"emotions: {', '.join(config.EMOTIONS)}")
         await send_to_robot({"type": "emotion", "name": name})
     elif action == "head":
+        if body is not None:
+            body.stop()
+        if dancer is not None:
+            dancer.stop()
         pan = _number(payload, "pan", -config.TRACK_PAN_LIMIT, config.TRACK_PAN_LIMIT)
         tilt = _number(payload, "tilt", config.TRACK_TILT_MIN, config.TRACK_TILT_MAX)
         if tracker is not None and tracker.enabled:
@@ -978,6 +1054,11 @@ async def _console_command(action: str, payload: dict) -> dict:
         value = _number(payload, "value", *VOICE_TUNABLE[key])
         setattr(config, key, value)
         print(f"console: {key} = {value:g} (until restart; set it in config.py to keep)")
+    elif action == "dance":
+        picked = start_dance(payload.get("name"))
+        if picked is None:
+            raise ValueError("no robot connected")
+        return {"dance": picked}
     elif action == "power_off":
         if robot_socket is None:
             raise ValueError("no robot connected")
@@ -1371,6 +1452,7 @@ async def main() -> None:
     main_loop = loop
     brain = RobotBrain(ABILITIES)
     brain.situation = situation
+    global body, dancer
     brain.memory = memories.prompt
     print(f"long-term memory: {len(memories.facts())} facts in {config.MEMORY_FILE}")
     print("web search:", "on (Anthropic, ~1 cent a question)" if searcher is not None else
@@ -1381,6 +1463,12 @@ async def main() -> None:
     tracker = Tracker(eyes, lambda p, t, on: loop.call_soon_threadsafe(head_moves.put_nowait, (p, t, on)))
     eyes.has_annotator = True
     tracker.start()
+    body = Body(send_to_robot, tracker)
+    body.allowed = lambda: (robot_socket is not None and not robot_asleep and time.time() < awake_until
+                            and not tracker.enabled and not (dancer is not None and dancer.dancing))
+    dancer = Dancer(send_to_robot, tracker)
+    dancer.ready = lambda: not (ears is not None and ears.muted.is_set())  # his line has been said
+    dancer.before = _before_dancing
     print("face tracking:", "on" if config.TRACKING else f"off — say \"{config.ROBOT_NAME}, track me\" or type `track on`")
     print("type `ask <question>` to talk to the brain right now\n")
     async with websockets.serve(handle_robot, "0.0.0.0", config.PORT, max_size=256 * 1024):
