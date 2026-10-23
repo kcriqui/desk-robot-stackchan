@@ -5,7 +5,9 @@ Adapted from the original project's V2 (cgro00/desk-robot, brain/body.py, MIT).
 When his voice starts, the reply's emotion plays a short gesture (a happy bounce, a surprised pull-back, a sad
 droop), then he settles into that emotion's posture and sways a little around it, a small nod or drift every few
 seconds, until he stops talking and goes back to where he was. While a reply is being worked out he glances up and to
-the side, as if thinking.
+the side, as if thinking. Awake and waiting for you, he idles attentively: every few seconds a drift, a nod, back to
+the middle, or now and then a proper look around (idle_loop), but never while you're talking (the servos' hum
+would reach the microphone).
 
 Everything is an offset from the head's resting pose (the tracker's pan / tilt: where he was last told to look), so
 he always comes back to it, and it's clamped to the neck's range (a StackChan can't tilt below level; it rests a
@@ -52,6 +54,11 @@ STYLE: dict[str, tuple[float, float] | None] = {
     "thinking": (0.7, 1.3), "sleepy": None,
 }
 PONDER = (6.0, 5.0)        # glance up and to the side while working out a reply
+IDLE_EVERY = (4.0, 9.0)    # s between idle moves while he waits for you
+IDLE_DRIFT = (9.0, 4.5)    # deg at most, pan / tilt, around where he rests
+IDLE_LOOK = (18.0, 30.0)   # deg of pan for the occasional big look around (with -6 .. +10 of tilt)
+# How often each idle move comes up: back to the middle, a nod, a big look; the rest are drifts.
+IDLE_CHANCES = (0.2, 0.2, 0.12)
 SWAY_NOD = 2.5             # deg down and back
 SWAY_DRIFT = 3.0           # deg either side of the posture
 SWAY_EVERY = (2.2, 4.0)    # s between sway moves (times the emotion's pace)
@@ -63,12 +70,14 @@ class Body:
         self.send = send                     # main.send_to_robot
         self.tracker = tracker               # its pan / tilt is the resting pose (None: straight ahead, at rest)
         self.allowed: Callable[[], bool] = lambda: True   # main.py: awake, robot connected, not tracking or dancing
+        self.hush: Callable[[], bool] = lambda: False     # main.py: someone is talking (idle moves wait)
         self.talking = False
         self._emotion = "neutral"
         self._task: asyncio.Task | None = None
         self._holds = 0
         self._sent: tuple[float, float] | None = None   # the last pose we sent (None: the head is at rest)
         self._looked = False                 # a look turned the head this turn: keep still until he's done talking
+        self._idle_off = (0.0, 0.0)          # where an idle drift left him, as an offset from rest
 
     # ── what main.py calls ──────────────────────────────────────────────────
 
@@ -107,6 +116,7 @@ class Body:
         self.talking = False
         self._cancel()
         self._sent = None
+        self._idle_off = (0.0, 0.0)
 
     @contextlib.asynccontextmanager
     async def hold(self):
@@ -122,6 +132,16 @@ class Body:
             yield
         finally:
             self._holds -= 1
+
+    async def idle_loop(self) -> None:
+        """Forever: while he's awake and waiting (not talking, thinking, looking or listening to you), a small move
+        every few seconds. main.py runs it."""
+        while True:
+            await asyncio.sleep(random.uniform(*IDLE_EVERY))
+            busy = self.talking or self._holds or (self._task is not None and not self._task.done())
+            if busy or self.hush() or not self._ok():
+                continue
+            self._start(self._idle_move())
 
     def test(self, emotion: str) -> None:
         """Play one emotion's gesture and a few seconds of its sway (the console's `gesture`), then rest."""
@@ -171,11 +191,29 @@ class Body:
         if self._sent is not None:
             await self._go(0.0, 0.0, home=True)
         self._sent = None
+        self._idle_off = (0.0, 0.0)
 
     async def _ponder(self) -> None:
         side = random.choice((-1, 1))
         await asyncio.sleep(0.25)
         await self._go(side * PONDER[0], PONDER[1])
+
+    async def _idle_move(self) -> None:
+        middle, nod, look = IDLE_CHANCES
+        r = random.random()
+        if r < middle:                            # back to the middle
+            await self._rest()
+        elif r < middle + nod:                    # a small nod, then back up
+            dp, dt = self._idle_off
+            if await self._go(dp, dt - 3.0):
+                await asyncio.sleep(0.3)
+                await self._go(dp, dt)
+        elif r < middle + nod + look:             # a proper look around: something caught his eye
+            self._idle_off = (random.choice((-1, 1)) * random.uniform(*IDLE_LOOK), random.uniform(-6.0, 10.0))
+            await self._go(*self._idle_off)
+        else:                                     # drift a little: look at something nearby
+            self._idle_off = (random.uniform(-1, 1) * IDLE_DRIFT[0], random.uniform(-0.5, 1) * IDLE_DRIFT[1])
+            await self._go(*self._idle_off)
 
     async def _perform(self, emotion: str, gesture: bool) -> None:
         if gesture:

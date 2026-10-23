@@ -127,6 +127,30 @@ class BodyTests(unittest.TestCase):
         run(go())
         self.assertEqual(robot.moves()[-2:], [("pan", 0.0), ("tilt", 20.0)], "the glance was taken back first")
 
+    def test_idles_while_waiting_but_not_while_you_talk(self):
+        robot, _, b = self.make()
+        talking = [False]
+        b.hush = lambda: talking[0]
+
+        async def go():
+            with patch.object(body_mod, "IDLE_EVERY", (0.02, 0.04)):
+                loop = asyncio.ensure_future(b.idle_loop())
+                await asyncio.sleep(0.6)
+                moved = len(robot.moves())
+                talking[0] = True                 # you start talking
+                await asyncio.sleep(0.6)
+                during = len(robot.moves()) - moved
+                loop.cancel()
+                return moved, during
+        moved, during = run(go())
+        self.assertGreater(moved, 2, "small moves while he waits")
+        self.assertLessEqual(during, 2, "at most the move already under way")
+        for axis, deg in robot.moves():   # drifts and the odd big look, around where he rests
+            if axis == "pan":
+                self.assertLessEqual(abs(deg), body_mod.IDLE_LOOK[1], deg)
+            else:
+                self.assertTrue(20.0 - 6.0 <= deg <= 20.0 + 10.0, deg)
+
     def test_stop_forgets_the_offset(self):
         robot, _, b = self.make()
 

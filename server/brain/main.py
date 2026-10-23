@@ -1579,6 +1579,7 @@ async def main() -> None:
     body = Body(send_to_robot, tracker)
     body.allowed = lambda: (robot_socket is not None and not robot_asleep and time.time() < awake_until
                             and not tracker.enabled and not (dancer is not None and dancer.dancing))
+    body.hush = lambda: ears is not None and (ears.hearing or ears.muted.is_set())  # you, or he, are talking
     dancer = Dancer(send_to_robot, tracker)
     dancer.ready = lambda: not (ears is not None and ears.muted.is_set())  # his line has been said
     dancer.before = _before_dancing
@@ -1589,6 +1590,7 @@ async def main() -> None:
         doze_task = asyncio.create_task(doze_loop())
         head_task = asyncio.create_task(head_loop())
         watch_task = asyncio.create_task(watch_loop())
+        idle_task = asyncio.create_task(body.idle_loop())  # small head moves while he waits for you
         if config.LISTEN_ON_START:
             await start_listening()
         try:
@@ -1598,6 +1600,7 @@ async def main() -> None:
             doze_task.cancel()
             head_task.cancel()
             watch_task.cancel()
+            idle_task.cancel()
             if ears is not None:
                 stop_listening()
 
