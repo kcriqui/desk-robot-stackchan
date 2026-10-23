@@ -91,5 +91,14 @@ constexpr float POWER_OFF_VOLTS = 3.50f;
 // (the same threshold as the brain's).
 constexpr float ON_BATTERY_MA = 20.0f;
 
+// ─── Clock screen ────────────────────────────────────────────────────────────
+// Asleep, after this long on the sleeping face, the screen shows the time,
+// the date and the weather (clock_screen.h). false = the sleeping face stays.
+constexpr bool CLOCK_SCREEN = true;
+constexpr uint32_t SLEEP_FACE_MS = 5000;
+// Screen brightness for the clock, 0-255; 0 = as bright as when he's awake
+// (the sleeping face itself is dimmed to a quarter of that).
+constexpr uint8_t CLOCK_BRIGHTNESS = 0;
+
 // ─── Behavior ────────────────────────────────────────────────────────────────
 constexpr uint32_t FRAME_INTERVAL_MS = 33;  // ~30 FPS face animation

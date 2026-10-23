@@ -60,6 +60,13 @@ settle. The server takes either type.
 {"type": "glance", "on": false}   // allow/forbid the firmware's idle head glances; the server sends off on connect and leaves them off
 {"type": "mic", "on": true}       // stream the microphone to the server
 {"type": "stream", "on": true, "fps": 10}   // start/stop the camera stream, set rate
+{"type": "clock", "tz": "PST8PDT,M3.2.0,M11.1.0", "h24": false}  // firmware-stackchan 0.6.0+: the clock screen's
+                                  // time zone (POSIX rule) and style; kept in flash. The robot gets the time
+                                  // itself (SNTP) and keeps it in its clock chip. Sent on connect.
+{"type": "weather", "temp": 65, "hi": 67, "lo": 54, "code": 2, "day": true, "unit": "F", "sky": "partly cloudy"}
+                                  // 0.6.0+: the weather at home for the clock screen (WMO code), on connect
+                                  // and every 30 min; the screen drops it after 3 h without an update.
+                                  // Asleep for 5 s (not in deep sleep), the robot shows the clock screen.
 {"type": "power_off", "why": "idle"}  // firmware-stackchan 0.5.0+: power off ("idle" or "battery"); the
                                   // server says goodbye first. Only the power button turns it back on.
                                   // On battery the robot also sleeps deeper by itself after 5 min asleep

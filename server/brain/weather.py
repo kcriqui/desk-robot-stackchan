@@ -133,3 +133,23 @@ def report(place_text: str = "") -> str:
         lines.append(f"{label}: {_WMO.get(d['weather_code'][i], 'unknown')}, high {d['temperature_2m_max'][i]:.0f}, "
                      f"low {d['temperature_2m_min'][i]:.0f}" + (f", {rain}% chance of rain" if rain is not None else "") + ".")
     return " ".join(lines)
+
+
+def now_at_home() -> dict | None:
+    """Now and today at home, for the robot's clock screen (clock.py): temp, hi, lo (whole degrees), the WMO code,
+    day or night, the unit ("F" or "C") and the sky in words. None without a home."""
+    place = home()
+    if place is None:
+        return None
+    f = config.TEMP_UNIT
+    data = _get(_FORECAST, {
+        "latitude": place.lat, "longitude": place.lon, "timezone": "auto", "forecast_days": 1,
+        "temperature_unit": f,
+        "current": "temperature_2m,weather_code,is_day",
+        "daily": "temperature_2m_max,temperature_2m_min",
+    })
+    c, d = data["current"], data["daily"]
+    code = int(c["weather_code"])
+    return {"temp": round(c["temperature_2m"]), "hi": round(d["temperature_2m_max"][0]),
+            "lo": round(d["temperature_2m_min"][0]), "code": code, "day": bool(c.get("is_day", 1)),
+            "unit": "F" if f == "fahrenheit" else "C", "sky": _WMO.get(code, "")}

@@ -44,7 +44,7 @@ import time
 
 import websockets
 
-from . import alerts, battery, config, mouth, personality, weather, web
+from . import alerts, battery, clock, config, mouth, personality, weather, web
 from .body import Body
 from .dance import Dancer, length as dance_length
 from .memories import Memories
@@ -56,6 +56,7 @@ from .tracker import Tracker
 
 robot_socket: websockets.ServerConnection | None = None
 robot_peer = ""          # the connected robot's address
+robot_fw = (0, 0, 0)     # its firmware version, from the hello
 robot_heard_at = 0.0     # when it last sent anything (it sends something every few seconds)
 _greeting = 0            # connections waiting to say hello
 MAX_GREETING = 8         # more than this at once is a flood: refused at once
@@ -197,6 +198,11 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         asyncio.create_task(old.close(1001))
     robot_socket = websocket
     robot_peer, robot_heard_at = peer, time.time()
+    global robot_fw
+    try:
+        robot_fw = tuple(int(x) for x in str(hello.get("fw", "0")).split(".")[:3])
+    except ValueError:
+        robot_fw = (0, 0, 0)
     print(f"robot connected! (fw {hello.get('fw', '?')}, {peer})")
     global robot_wake_word, robot_asleep, powering_off, powered_off, robot_deep_sleep
     powering_off = False  # it powered back on (or never went)
@@ -225,6 +231,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     await send_to_robot({"type": "asleep", "on": robot_asleep})
     # No idle head glances: they fight deliberate looks. The eyes still move.
     await send_to_robot({"type": "glance", "on": False})
+    asyncio.create_task(send_clock())  # the clock screen's time zone and weather (fetched: don't hold up the link)
     try:
         async for message in websocket:
             if websocket is robot_socket:
@@ -1309,6 +1316,27 @@ _ALERT_EMOTIONS = {
 }
 
 
+async def send_clock() -> None:
+    """The clock screen's time zone, then the weather (StackChan firmware 0.6.0+)."""
+    if robot_fw < (0, 6, 0):
+        return
+    await send_to_robot({"type": "clock", "tz": clock.posix_tz(), "h24": config.CLOCK_24H})
+    await send_weather()
+
+
+async def send_weather() -> None:
+    """The weather at home for the clock screen. Nothing without HOME_LOCATION or when the service is down."""
+    if robot_socket is None or robot_fw < (0, 6, 0):
+        return
+    try:
+        msg = await asyncio.get_running_loop().run_in_executor(None, clock.weather_message)
+    except (OSError, ValueError, KeyError) as e:  # offline, or an odd reply
+        print(f"(weather for the clock screen: {e})")
+        return
+    if msg is not None:
+        await send_to_robot(msg)
+
+
 powering_off = False  # the robot was told to power off; cleared when it says hello again
 robot_deep_sleep = False  # the robot's own deep sleep (on battery), from its battery reports
 powered_off: tuple[str, float] | None = None  # (why, when) we powered it off; None once it's back
@@ -1334,6 +1362,7 @@ async def watch_loop() -> None:
     when)."""
     battery_watch, temp_watch = alerts.BatteryWatch(), alerts.TempWatch()
     power_watch = alerts.PowerOffWatch()
+    next_weather = time.time() + config.CLOCK_WEATHER_MINUTES * 60  # (sent on connect too)
     while True:
         await asyncio.sleep(1)
         try:
@@ -1347,6 +1376,9 @@ async def watch_loop() -> None:
             key = temp_watch.check(eyes.temperature, now)
             if key:
                 await announce(key, _ALERT_EMOTIONS[key], temp=round(eyes.temperature))
+            if now >= next_weather:
+                next_weather = now + config.CLOCK_WEATHER_MINUTES * 60
+                asyncio.create_task(send_weather())
             key = power_watch.check(eyes.battery, robot_asleep, bool(timers.pending()), now)
             if key and not powering_off and robot_socket is not None:
                 await power_off(key)

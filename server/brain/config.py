@@ -387,6 +387,13 @@ SEARCH_MAX_USES = 3        # searches per question, at most
 # Set it in server/.env; with none, he asks where.
 HOME_LOCATION = os.environ.get("HOME_LOCATION", "").strip()
 TEMP_UNIT = "celsius" if os.environ.get("TEMP_UNIT", "").lower().startswith("c") else "fahrenheit"
+# The robot's clock screen while he's asleep (StackChan firmware 0.6.0+; clock.py):
+# it's told the time zone and, every CLOCK_WEATHER_MINUTES, the weather at
+# HOME_LOCATION. CLOCK_TZ (a POSIX rule like PST8PDT,M3.2.0,M11.1.0) overrides the
+# zone worked out from this computer's.
+CLOCK_TZ = os.environ.get("CLOCK_TZ", "").strip()
+CLOCK_24H = os.environ.get("CLOCK_24H", "") == "1"
+CLOCK_WEATHER_MINUTES = 30
 
 # Facts he keeps for good (the remember / forget tools; memories.py). The
 # server/data folder is git-ignored.

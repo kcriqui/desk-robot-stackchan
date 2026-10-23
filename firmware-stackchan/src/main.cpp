@@ -9,6 +9,7 @@
 #include <WiFi.h>
 
 #include "camera.h"
+#include "clock_screen.h"
 #include "config.h"
 #include "face.h"
 #include "face_gfx.h"
@@ -45,6 +46,8 @@ Speaker speaker;
 Mic mic;
 Wake wake;
 Camera camera;
+ClockScreen clockScreen;
+bool clockShown = false;  // the clock screen is up instead of the face
 uint32_t nextTempMs = 0;
 volatile bool speakDonePending = false;  // set by the speaker task, sent from loop()
 
@@ -214,6 +217,8 @@ void printHelp() {
   Serial.println(F("  power        battery, deep sleep and power-off state"));
   Serial.println(F("  deep now     asleep on battery: sleep deeper now, not after 5 min"));
   Serial.println(F("  poweroff     power off now (the power button turns him back on)"));
+  Serial.println(F("  clock [tz [12|24]]  the clock screen's time zone (POSIX rule), or its status"));
+  Serial.println(F("  weather <temp> <hi> <lo> <code> <day 0|1> <F|C> <words>  the clock screen's weather"));
   Serial.println(F("  help         this text"));
 }
 
@@ -355,6 +360,14 @@ void handleCommand(String line) {
     if (arg == "now" && face.asleep() && asleepSinceMs) asleepSinceMs = (millis() - DEEP_SLEEP_AFTER_MS) | 1;
     else if (arg == "off") setDeepSleep(false);
     Serial.printf("deep sleep: %s (asleep on battery only)\n", deepSleep || arg == "now" ? "on" : "off");
+  } else if (cmd == "clock") {
+    if (!arg.isEmpty()) {
+      int sp = arg.indexOf(' ');
+      clockScreen.setClock(sp < 0 ? arg : arg.substring(0, sp), sp >= 0 && arg.substring(sp + 1) == "24");
+    }
+    clockScreen.printStatus();
+  } else if (cmd == "weather") {
+    if (!clockScreen.setWeather(arg)) Serial.println(F("usage: weather <temp> <hi> <lo> <code> <day 0|1> <F|C> <words>"));
   } else if (cmd == "poweroff") {
     powerOff(arg.isEmpty() ? String("console") : arg);
   } else if (cmd == "glance") {
@@ -482,7 +495,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.5.2 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.0 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -509,6 +522,7 @@ void setup() {
 #else
   Serial.println(F("no include/secrets.h — USB-only mode (see secrets.h.example)"));
 #endif
+  clockScreen.begin();  // the time from the clock chip now, internet time once WiFi is up
 }
 
 void loop() {
@@ -603,6 +617,7 @@ void loop() {
 #endif
 
   updatePower(now);
+  clockScreen.update(now);
 
   // Demo mode: wander through emotions so a fresh flash shows everything.
   if (demoMode && now >= nextDemoEmotionMs) {
@@ -619,7 +634,27 @@ void loop() {
     lastFrameMs = now;
     face.setTalking(speaker.speaking(), speaker.level());
     uint32_t tf = micros();
-    if (!deepSleep) face.update(now);  // screen off: nothing to draw
+    // Asleep for a moment (not in deep sleep, where the screen is off): the
+    // clock screen instead of the face. Waking clears it for the face.
+    bool clock = CLOCK_SCREEN && face.asleep() && !deepSleep && asleepSinceMs &&
+                 msSince(now, asleepSinceMs) >= SLEEP_FACE_MS;
+    if (clock != clockShown) {
+      clockShown = clock;
+      if (clock) {
+        clockScreen.draw(now, true);  // the whole screen, over the face
+        // Readable, not dimmed like the sleeping face.
+        M5.Display.setBrightness(CLOCK_BRIGHTNESS ? CLOCK_BRIGHTNESS : max(awakeBrightness, (uint8_t)96));
+      } else {
+        M5.Display.fillScreen(BACKGROUND_COLOR);
+      }
+    } else if (clockShown) {
+      clockScreen.draw(now, false);  // only what changed (once a minute, or new weather)
+    }
+    if (clockShown) {
+      // drawn above
+    } else if (!deepSleep) {
+      face.update(now);  // screen off in deep sleep: nothing to draw
+    }
     diag.face = max(diag.face, micros() - tf);
     uint32_t tn = micros();
     panNeck.update(now);
