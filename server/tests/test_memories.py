@@ -44,6 +44,13 @@ class MemoriesTests(unittest.TestCase):
         self.assertEqual(len(m.facts(DAY)), 1)
         self.assertEqual(fact.added, "2026-10-25")   # refreshed
 
+    def test_a_copied_date_note_is_dropped(self):
+        m = Memories(self.path)
+        fact, _ = m.add("Kevin's favorite color is purple. (learned 2026-10-22)", today=DAY)
+        self.assertEqual(fact.text, "Kevin's favorite color is purple.")
+        fact, new = m.add("Kevin's favorite color is purple. (Learned 2026-10-22, true until 2026-11-01)", today=DAY)
+        self.assertFalse(new)   # the same fact, not a second one
+
     def test_refuses_secrets_and_junk(self):
         m = Memories(self.path)
         for bad in ["", "   ", "Kevin's wifi password is hunter2", "the PIN code is 1234",

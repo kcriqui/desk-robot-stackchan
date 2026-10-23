@@ -456,7 +456,10 @@ cd server && python -m unittest tests/test_personality.py tests/test_segmenter.p
   locally. The first run downloads speech models from Hugging Face and
   GitHub, pinned to fixed versions. The console page loads nothing from the
   internet.
-- **What is stored:** the in-memory conversation, and nothing else unless
+- **What is stored:** the in-memory conversation; the facts he keeps for
+  good (`remember`), in `server/data/memories.json` (git-ignored; delete a
+  line or the file to make him forget, or use Forget in the console page);
+  and nothing else unless
   you turn on `DEBUG_SAVE_TTS` or `DEBUG_SAVE_UTTERANCE` in `config.py`,
   which keep recent spoken replies or the last thing heard in
   `server/debug/` (git-ignored).

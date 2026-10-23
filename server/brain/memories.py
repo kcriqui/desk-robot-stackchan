@@ -31,6 +31,7 @@ KEEP_FORGOTTEN = 50
 # Things he must not keep, however they're asked for.
 _SECRET = re.compile(r"\b(password|passcode|passphrase|pin (code|number)|credit card|card number|"
                      r"social security|bank account|account number)\b", re.I)
+_DATE_NOTE = re.compile(r"\s*\((learned|true until)\b[^)]*\)\s*$", re.I)
 _STOP = {"a", "an", "the", "and", "or", "of", "to", "for", "with", "about", "that", "this", "is",
          "are", "was", "my", "his", "her", "their", "your", "me", "you", "i", "it", "fact", "facts"}
 
@@ -96,7 +97,8 @@ class Memories:
         """Remember a fact, for good or for `days` days (today counts as the
         first). Returns (the fact, whether it's new): the same fact again
         only refreshes its dates. Raises ValueError for one he shouldn't keep."""
-        text = " ".join(str(text).split())
+        # The model sometimes copies the "(learned ...)" note from its prompt into the fact.
+        text = _DATE_NOTE.sub("", " ".join(str(text).split()))
         if not text:
             raise ValueError("nothing to remember")
         if len(text) > MAX_CHARS:
