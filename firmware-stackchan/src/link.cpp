@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-static const char* FW_VERSION = "0.4.1";
+static const char* FW_VERSION = "0.5.0";
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
@@ -15,7 +15,7 @@ void Link::begin(const char* ssid, const char* pass, const char* host,
   onState_ = std::move(onState);
 
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);  // lower latency; we're on wall power anyway
+  WiFi.setSleep(false);  // lower latency; main.cpp turns power saving on in deep sleep
   WiFi.begin(ssid_, pass_);
   Serial.printf("wifi: joining \"%s\"...\n", ssid_);
 
@@ -135,6 +135,8 @@ void Link::handleMessage(const char* json) {
     cmd = String("sleep ") + ((doc["on"] | false) ? "on" : "off");
   } else if (!strcmp(type, "wake_word")) {
     cmd = String("wake ") + ((doc["on"] | false) ? "on" : "off");
+  } else if (!strcmp(type, "power_off")) {
+    cmd = String("poweroff ") + (doc["why"] | "brain");
   } else if (!strcmp(type, "stream")) {
     cmd = String("stream ") + ((doc["on"] | false) ? "on " : "off ") + String(doc["fps"] | 10.0f, 1);
   } else {

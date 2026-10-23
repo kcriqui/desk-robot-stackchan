@@ -113,12 +113,66 @@ void applyMic() {
 }
 uint8_t awakeBrightness = 0;
 
+// Power on battery (config.h). Asleep on battery for DEEP_SLEEP_AFTER_MS, he
+// sleeps deeper: screen off, WiFi power saving, servo power off. The wake
+// word keeps listening. Powering off is the brain's call (it knows about
+// reminders, and says goodbye); the robot only does it itself when the brain
+// is gone or the battery is all but flat. Only the power button (and maybe
+// plugging in USB) turns him back on: the CoreS3's clock can't.
+float batteryVolts = 0, batteryMa = 0;  // the body's INA226, read every 10 s
+uint32_t nextBatteryMs = 0;
+uint32_t asleepSinceMs = 0;   // when his eyes shut; 0 while awake
+uint32_t orphanSinceMs = 0;   // when the brain link went away; 0 while connected
+uint8_t lowVoltReadings = 0;  // in a row, at or below POWER_OFF_VOLTS
+bool deepSleep = false;
+
+bool onBattery() { return batteryMa > ON_BATTERY_MA; }
+
+void setDeepSleep(bool on) {
+  if (on == deepSleep) return;
+  deepSleep = on;
+  if (on) {
+    M5.Display.setBrightness(0);
+    M5.Display.sleep();
+    WiFi.setSleep(true);  // modem sleep: asleep, he sends nothing but a reading every 10 s
+    M5StackChan.setServoPowerEnabled(false);
+  } else {
+    M5StackChan.setServoPowerEnabled(true);
+    WiFi.setSleep(false);
+    M5.Display.wakeup();
+    M5.Display.setBrightness(face.asleep() ? max(awakeBrightness / 4, 8) : awakeBrightness);
+  }
+  Serial.printf("power: deep sleep %s (%.2f V, %.0f mA)\n", on ? "on" : "off", batteryVolts, batteryMa);
+}
+
+// Shows why, waits for any speech to finish, and cuts the power.
+void powerOff(const String& why) {
+  Serial.printf("power: off (%s)\n", why.c_str());
+  setDeepSleep(false);
+  for (int i = 0; i < 100 && speaker.speaking(); ++i) delay(100);  // the goodbye, if still playing
+  M5.Display.setBrightness(max(awakeBrightness, (uint8_t)64));
+  M5.Display.fillScreen(TFT_BLACK);
+  M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+  M5.Display.setTextDatum(middle_center);
+  M5.Display.setFont(&fonts::FreeSans12pt7b);
+  M5.Display.drawString("Powering off", M5.Display.width() / 2, M5.Display.height() / 2 - 30);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
+  M5.Display.drawString(why == "battery" ? "Battery almost empty" : "to save the battery",
+                        M5.Display.width() / 2, M5.Display.height() / 2 + 5);
+  M5.Display.drawString("Press the power button to wake me", M5.Display.width() / 2,
+                        M5.Display.height() / 2 + 35);
+  delay(4000);
+  M5.Power.powerOff();
+}
+
 void applyStream() {
   camera.setStreaming(streamWanted && !face.asleep(), streamFps);
 }
 
 void setAsleep(bool on) {
+  if (!on) setDeepSleep(false);
   if (on != face.asleep()) {
+    asleepSinceMs = on ? (millis() | 1) : 0;  // never 0 while asleep
     if (on) {
       awakeBrightness = M5.Display.getBrightness();
       M5.Display.setBrightness(max(awakeBrightness / 4, 8));
@@ -156,6 +210,9 @@ void printHelp() {
   Serial.println(F("  snap         grab one frame and report its size"));
   Serial.println(F("  temp         chip temperature"));
   Serial.println(F("  battery      battery voltage and current"));
+  Serial.println(F("  power        battery, deep sleep and power-off state"));
+  Serial.println(F("  deep now     asleep on battery: sleep deeper now, not after 5 min"));
+  Serial.println(F("  poweroff     power off now (the power button turns him back on)"));
   Serial.println(F("  help         this text"));
 }
 
@@ -222,6 +279,7 @@ void handleCommand(String line) {
     setAsleep(arg == "on");
     Serial.printf("sleep %s (camera %s)\n", face.asleep() ? "on" : "off", camera.streaming() ? "on" : "off");
   } else if (cmd == "speak_begin") {
+    setDeepSleep(false);
     speaker.beginSpeech(static_cast<size_t>(arg.toInt()));
   } else if (cmd == "speak_end") {
     speaker.endSpeech();
@@ -285,6 +343,19 @@ void handleCommand(String line) {
   } else if (cmd == "battery") {
     Serial.printf("battery %.2f V, %.0f mA\n", M5StackChan.getBatteryVoltage(),
                   M5StackChan.getBatteryCurrent() * 1000.0f);
+  } else if (cmd == "power") {
+    uint32_t now = millis();
+    Serial.printf("power: %.2f V, %.0f mA (%s), %s, deep sleep %s, brain %s\n", batteryVolts, batteryMa,
+                  onBattery() ? "on battery" : "USB", face.asleep() ? "asleep" : "awake",
+                  deepSleep ? "on" : "off", brainLink.connected() ? "connected" : "gone");
+    if (asleepSinceMs) Serial.printf("  asleep %lu s\n", (unsigned long)((now - asleepSinceMs) / 1000));
+    if (orphanSinceMs) Serial.printf("  no brain for %lu s\n", (unsigned long)((now - orphanSinceMs) / 1000));
+  } else if (cmd == "deep") {
+    if (arg == "now" && face.asleep() && asleepSinceMs) asleepSinceMs = (millis() - DEEP_SLEEP_AFTER_MS) | 1;
+    else if (arg == "off") setDeepSleep(false);
+    Serial.printf("deep sleep: %s (asleep on battery only)\n", deepSleep || arg == "now" ? "on" : "off");
+  } else if (cmd == "poweroff") {
+    powerOff(arg.isEmpty() ? String("console") : arg);
   } else if (cmd == "glance") {
     glanceWanted = (arg == "on");
     applyGlances();
@@ -325,6 +396,39 @@ void updateOta() {
   ArduinoOTA.handle();
 }
 #endif
+
+// Milliseconds from `then` to `now`, 0 if `then` is later: a command handled
+// during this loop (falling asleep) can stamp a time after the loop's `now`,
+// and the plain subtraction then wraps to ~49 days (he slept deep at once).
+uint32_t msSince(uint32_t now, uint32_t then) {
+  return static_cast<int32_t>(now - then) > 0 ? now - then : 0;
+}
+
+// Every loop: read the battery every 10 s, sleep deeper when it's time, and
+// the robot's own power-off fallbacks (config.h).
+void updatePower(uint32_t now) {
+  if (now >= nextBatteryMs) {
+    nextBatteryMs = now + 10000;
+    batteryVolts = M5StackChan.getBatteryVoltage();
+    batteryMa = M5StackChan.getBatteryCurrent() * 1000.0f;
+    lowVoltReadings = (onBattery() && batteryVolts > 1.0f && batteryVolts <= POWER_OFF_VOLTS)
+                          ? lowVoltReadings + 1 : 0;
+    if (lowVoltReadings >= (brainLink.connected() ? 12 : 3)) {
+      powerOff("battery");  // the brain says goodbye first if it can; this is the backstop
+    }
+  }
+  if (!onBattery()) {
+    setDeepSleep(false);  // plugged in: back to normal
+  } else if (face.asleep() && asleepSinceMs && msSince(now, asleepSinceMs) >= DEEP_SLEEP_AFTER_MS) {
+    setDeepSleep(true);
+  }
+  if (brainLink.connected()) {
+    orphanSinceMs = 0;
+  } else {
+    if (!orphanSinceMs) orphanSinceMs = now | 1;
+    if (onBattery() && msSince(now, orphanSinceMs) >= ORPHAN_POWER_OFF_MS) powerOff("no brain");
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -374,7 +478,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.4.1 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.5.0 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -478,7 +582,7 @@ void loop() {
     // The body's battery (INA226): volts, and mA (+ discharging, - charging).
     char battery[64];
     snprintf(battery, sizeof battery, "{\"type\":\"battery\",\"v\":%.2f,\"ma\":%.0f}",
-             M5StackChan.getBatteryVoltage(), M5StackChan.getBatteryCurrent() * 1000.0f);
+             batteryVolts, batteryMa);
     brainLink.sendJson(battery);
   }
   if (brainLink.connected() && now >= nextStateMs) {
@@ -486,6 +590,8 @@ void loop() {
     brainLink.sendState(panNeck.current(), emotionName(face.emotion()));
   }
 #endif
+
+  updatePower(now);
 
   // Demo mode: wander through emotions so a fresh flash shows everything.
   if (demoMode && now >= nextDemoEmotionMs) {
@@ -502,7 +608,7 @@ void loop() {
     lastFrameMs = now;
     face.setTalking(speaker.speaking(), speaker.level());
     uint32_t tf = micros();
-    face.update(now);
+    if (!deepSleep) face.update(now);  // screen off: nothing to draw
     diag.face = max(diag.face, micros() - tf);
     uint32_t tn = micros();
     panNeck.update(now);

@@ -142,6 +142,10 @@ LINES = {
     "battery_very_low": f"Battery {{percent}} percent, {config.HUMAN_NAME}! Maybe {{minutes}} minutes left. Need USB, please.",
     "battery_critical": f"Bad bad bad! Battery almost empty, {config.HUMAN_NAME}! Plug me in now, or I go dark!",
     "battery_saved": "Ahh, power! Thank you. Good good good.",
+    # Goodbyes before the robot powers off on battery (main.py power_off).
+    "power_off_idle": f"Long quiet, {config.HUMAN_NAME}. I power off now, save battery. Press my side button to wake me.",
+    "power_off_idle_timers": f"Long quiet and battery low, {config.HUMAN_NAME}. I power off now, so timer will not ring. Sorry. Press my side button to wake me.",
+    "power_off_battery": f"Battery almost empty, {config.HUMAN_NAME}! I shut down now. Charge me, then press my side button.",
     "hot": f"{config.HUMAN_NAME}, I am hot inside. {{temp}} degrees. Not danger yet, but watch, please.",
     "very_hot": f"Too hot, {config.HUMAN_NAME}! {{temp}} degrees inside. Let me sleep and cool down, please.",
 }

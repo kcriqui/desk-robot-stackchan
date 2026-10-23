@@ -68,6 +68,59 @@ class TempWatchTests(unittest.TestCase):
         self.assertEqual(w.check(warn + 1, 900), "hot")
 
 
+class PowerOffWatchTests(unittest.TestCase):
+    IDLE = config.IDLE_POWER_OFF_MINUTES * 60
+
+    def run_until(self, w, volts, asleep, timers, start, end, step=10):
+        """Feed a reading every `step` s from `start` to `end`; the first key."""
+        for t in range(start, end + 1, step):
+            key = w.check(on_battery(volts, t), asleep, timers, t)
+            if key:
+                return key, t
+        return None, None
+
+    def test_powers_off_after_long_asleep_on_battery(self):
+        w = alerts.PowerOffWatch()
+        key, at = self.run_until(w, 3.90, True, False, 0, self.IDLE + 60)
+        self.assertEqual(key, "power_off_idle")
+        self.assertGreaterEqual(at, self.IDLE)
+
+    def test_waking_restarts_the_clock(self):
+        w = alerts.PowerOffWatch()
+        self.run_until(w, 3.90, True, False, 0, self.IDLE - 60)
+        w.check(on_battery(3.90, self.IDLE - 50), False, False, self.IDLE - 50)   # he woke
+        key, _ = self.run_until(w, 3.90, True, False, self.IDLE - 40, self.IDLE + 60)
+        self.assertIsNone(key)
+
+    def test_never_on_usb(self):
+        w = alerts.PowerOffWatch()
+        for t in range(0, self.IDLE + 600, 10):
+            self.assertIsNone(w.check(Reading(3.40, 2, t), True, False, t))   # USB: battery idle
+
+    def test_a_timer_keeps_him_on_unless_the_battery_is_low(self):
+        w = alerts.PowerOffWatch()
+        key, _ = self.run_until(w, 3.90, True, True, 0, self.IDLE + 600)   # ~70%
+        self.assertIsNone(key)
+        w = alerts.PowerOffWatch()
+        key, _ = self.run_until(w, 3.65, True, True, 0, self.IDLE + 60)    # ~15%
+        self.assertEqual(key, "power_off_idle_timers")
+
+    def test_nearly_flat_shuts_down_even_awake_with_timers(self):
+        w = alerts.PowerOffWatch()
+        key, at = self.run_until(w, 3.49, False, True, 0, 100)
+        self.assertEqual((key, at), ("power_off_battery", 20))   # three readings in
+        w = alerts.PowerOffWatch()   # one dip (talking) isn't enough
+        w.check(on_battery(3.85, 0), False, False, 0)
+        w.check(on_battery(3.45, 10), False, False, 10)
+        self.assertIsNone(w.check(on_battery(3.85, 20), False, False, 20))
+
+    def test_stale_readings_dont_count(self):
+        w = alerts.PowerOffWatch()
+        r = on_battery(3.40, 0)
+        for t in (0, 100, 200, 300):
+            self.assertIsNone(w.check(r, False, False, t))
+
+
 class TimerTests(unittest.TestCase):
     def test_set_ring_and_cancel(self):
         ts = Timers()
@@ -99,7 +152,8 @@ class TimerTests(unittest.TestCase):
 class LineTests(unittest.TestCase):
     def test_unasked_lines_fill_in(self):
         for key in ("timer", "timer_plain", "battery_low", "battery_very_low", "battery_critical",
-                    "battery_saved", "hot", "very_hot"):
+                    "battery_saved", "hot", "very_hot", "power_off_idle", "power_off_idle_timers",
+                    "power_off_battery"):
             personality.LINES[key].format(about="tea", percent=8, minutes=12, temp=72)
 
 

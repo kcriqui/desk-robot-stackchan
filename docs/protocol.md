@@ -52,6 +52,11 @@ settle. The server takes either type.
 {"type": "glance", "on": false}   // allow/forbid the firmware's idle head glances; the server sends off on connect and leaves them off
 {"type": "mic", "on": true}       // stream the microphone to the server
 {"type": "stream", "on": true, "fps": 10}   // start/stop the camera stream, set rate
+{"type": "power_off", "why": "idle"}  // firmware-stackchan 0.5.0+: power off ("idle" or "battery"); the
+                                  // server says goodbye first. Only the power button turns it back on.
+                                  // On battery the robot also sleeps deeper by itself after 5 min asleep
+                                  // (screen off, WiFi power saving, servo power off), and powers off
+                                  // on its own with no server for 30 min or a nearly flat battery.
 ```
 
 The server sends `stream on` at `CAMERA_FPS` when the robot connects. The

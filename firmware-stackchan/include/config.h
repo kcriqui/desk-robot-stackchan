@@ -75,5 +75,21 @@ constexpr float SPEAKER_VOLUME = 0.7f;  // 0.0-1.0
 constexpr uint32_t FACE_COLOR = 0xFFFFFF;        // RGB888
 constexpr uint32_t BACKGROUND_COLOR = 0x000000;
 
+// ─── Power (on battery) ──────────────────────────────────────────────────────
+// The body's battery is only 550 mAh. Asleep on battery for this long, he
+// saves more: screen off, WiFi power saving, servo power off. "Computer"
+// still wakes him. On USB power nothing changes.
+constexpr uint32_t DEEP_SLEEP_AFTER_MS = 5UL * 60 * 1000;
+// The brain decides when to power off (long idle, reminders, a nearly flat
+// battery) and says goodbye first. These are the robot's own fallbacks for
+// when it can't: on battery with no brain link for this long, or the battery
+// below POWER_OFF_VOLTS (about 5%, server/brain/battery.py's curve) for
+// three readings with no brain, or for two minutes with one.
+constexpr uint32_t ORPHAN_POWER_OFF_MS = 30UL * 60 * 1000;
+constexpr float POWER_OFF_VOLTS = 3.50f;
+// Drawing more than this from the battery means he's on battery, not USB
+// (the same threshold as the brain's).
+constexpr float ON_BATTERY_MA = 20.0f;
+
 // ─── Behavior ────────────────────────────────────────────────────────────────
 constexpr uint32_t FRAME_INTERVAL_MS = 33;  // ~30 FPS face animation

@@ -55,6 +55,44 @@ class BatteryWatch:
         return None
 
 
+class PowerOffWatch:
+    """When to power the robot off, on battery only: after
+    config.IDLE_POWER_OFF_MINUTES asleep, unless a timer is set and the
+    battery is still at config.POWER_OFF_TIMER_MIN_PERCENT or more; and at
+    config.POWER_OFF_CRITICAL_PERCENT, timers or not. The battery level is
+    the median of the last three readings, as in BatteryWatch. Returns the
+    goodbye line's key, or None."""
+
+    def __init__(self) -> None:
+        self.recent: deque[int] = deque(maxlen=3)
+        self.seen_at: float | None = None
+        self.asleep_since: float | None = None
+
+    def check(self, r: Reading | None, asleep: bool, timers_set: bool, now: float) -> str | None:
+        if not asleep:
+            self.asleep_since = None
+        elif self.asleep_since is None:
+            self.asleep_since = now
+        if r is None or not r.on_battery or now - r.at > 60:  # plugged in, or no fresh reading
+            self.recent.clear()
+            return None
+        if r.at != self.seen_at:
+            self.seen_at = r.at
+            self.recent.append(r.percent)
+        if len(self.recent) < self.recent.maxlen:
+            return None
+        p = sorted(self.recent)[1]
+        if p <= config.POWER_OFF_CRITICAL_PERCENT:
+            return "power_off_battery"
+        if self.asleep_since is None or now - self.asleep_since < config.IDLE_POWER_OFF_MINUTES * 60:
+            return None
+        if not timers_set:
+            return "power_off_idle"
+        if p < config.POWER_OFF_TIMER_MIN_PERCENT:
+            return "power_off_idle_timers"
+        return None
+
+
 class TempWatch:
     """Warns once when the chip passes config.TEMP_WARN_C, and again every
     10 minutes once it's 5 degrees hotter. Resets 5 degrees below the limit."""

@@ -272,6 +272,15 @@ BATTERY_WARNINGS = [
     (10, 10, "battery_very_low"),
     (5, 2, "battery_critical"),
 ]
+# Powering off on battery (StackChan; alerts.PowerOffWatch). Asleep this long
+# on battery, he says goodbye and powers off; only his power button (or USB,
+# maybe) turns him back on. A timer that's set keeps him on, unless the
+# battery is below POWER_OFF_TIMER_MIN_PERCENT. At POWER_OFF_CRITICAL_PERCENT
+# he shuts down whatever is going on. The robot sleeps deeper after 5 minutes
+# asleep on battery by itself (firmware-stackchan/include/config.h).
+IDLE_POWER_OFF_MINUTES = 30
+POWER_OFF_TIMER_MIN_PERCENT = 20
+POWER_OFF_CRITICAL_PERCENT = 5
 # Chip temperature: he warns once above TEMP_WARN_C, and again (every 10 min)
 # from 5 degrees hotter. It resets once he's cooled 5 degrees below it.
 TEMP_WARN_C = 70.0

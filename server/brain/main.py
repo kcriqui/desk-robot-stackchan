@@ -167,7 +167,8 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         await old.close(1001)
     robot_socket = websocket
     print(f"robot connected! (fw {hello.get('fw', '?')}, {peer})")
-    global robot_wake_word, robot_asleep
+    global robot_wake_word, robot_asleep, powering_off
+    powering_off = False  # it powered back on (or never went)
     offered = str(hello.get("wake") or "").strip().lower()
     robot_wake_word = offered if offered and config.WAKE_ON_ROBOT else None
     if robot_wake_word:
@@ -295,6 +296,11 @@ async def handle_console_line(line: str) -> bool:
             await set_volume(float(arg))
         except ValueError:
             print("usage: volume <0.0-1.0>")
+    elif cmd == "poweroff":
+        if robot_socket is None:
+            print("no robot connected")
+        else:
+            await power_off("power_off_idle")  # the goodbye, then the robot powers off
     elif cmd == "memories":
         facts = memories.facts()
         print("\n".join(f"  #{f.id} {f.text}  ({f.added}" + (f" to {f.until})" if f.until else ")")
@@ -304,7 +310,7 @@ async def handle_console_line(line: str) -> bool:
     elif cmd == "forget":
         print(forget({"about": arg})[0] if arg else "usage: forget <words | #number | all>")
     else:
-        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | memories | remember <fact> | forget <words|#|all> | status | quit")
+        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | memories | remember <fact> | forget <words|#|all> | poweroff | status | quit")
     return True
 
 
@@ -879,6 +885,7 @@ def console_state() -> dict:
         "tracking_enabled": tracker.enabled if tracker is not None else False,
         "volume": speaker_volume,
         "tuning": {k: getattr(config, k) for k in TUNABLE},
+        "battery_ma": eyes.battery.milliamps if eyes.battery is not None else None,
         "memories": [{"id": f.id, "text": f.text, "added": f.added, "until": f.until} for f in memories.facts()],
     }
 
@@ -964,6 +971,11 @@ async def _console_command(action: str, payload: dict) -> dict:
         value = _number(payload, "value", *VOICE_TUNABLE[key])
         setattr(config, key, value)
         print(f"console: {key} = {value:g} (until restart; set it in config.py to keep)")
+    elif action == "power_off":
+        if robot_socket is None:
+            raise ValueError("no robot connected")
+        print("console: power off")
+        asyncio.create_task(power_off("power_off_idle"))
     elif action == "remember":
         fact, _ = memories.add(str(payload.get("text", "")))  # a ValueError goes back to the page
         print(f"console: remember #{fact.id} {fact.text}")
@@ -1177,10 +1189,27 @@ _ALERT_EMOTIONS = {
 }
 
 
+powering_off = False  # the robot was told to power off; cleared when it says hello again
+
+
+async def power_off(key: str) -> None:
+    """Say goodbye, then have the robot power itself off (on battery, long
+    asleep or nearly flat; alerts.PowerOffWatch). Only its power button
+    turns it back on."""
+    global powering_off
+    powering_off = True
+    why = "battery" if key == "power_off_battery" else "idle"
+    await announce(key, "sleepy")  # waits for any conversation, and for the words to finish playing
+    print(f"(powering the robot off: {why})")
+    await send_to_robot({"type": "power_off", "why": why})
+
+
 async def watch_loop() -> None:
-    """Every second: ring due timers, and warn about the battery and the
-    chip's temperature (alerts.py decides when)."""
+    """Every second: ring due timers, warn about the battery and the chip's
+    temperature, and power off on battery when it's time (alerts.py decides
+    when)."""
     battery_watch, temp_watch = alerts.BatteryWatch(), alerts.TempWatch()
+    power_watch = alerts.PowerOffWatch()
     while True:
         await asyncio.sleep(1)
         try:
@@ -1194,6 +1223,9 @@ async def watch_loop() -> None:
             key = temp_watch.check(eyes.temperature, now)
             if key:
                 await announce(key, _ALERT_EMOTIONS[key], temp=round(eyes.temperature))
+            key = power_watch.check(eyes.battery, robot_asleep, bool(timers.pending()), now)
+            if key and not powering_off and robot_socket is not None:
+                await power_off(key)
         except Exception as e:  # a bad reading or a speaker hiccup mustn't stop the watch
             print(f"(watch loop: {e})")
 
