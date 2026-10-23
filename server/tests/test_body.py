@@ -37,6 +37,17 @@ def run(coro):
     return asyncio.run(coro)
 
 
+# A StackChan's neck (BODY=stackchan in server/.env), whatever the .env says.
+STACKCHAN_NECK = {"TRACK_TILT_MIN": 0.0, "TRACK_TILT_MAX": 90.0, "TILT_REST": 20.0, "TRACK_PAN_LIMIT": 120.0}
+
+
+def stackchan_neck(cls):
+    for name, value in STACKCHAN_NECK.items():
+        cls = patch.object(config, name, value)(cls)
+    return cls
+
+
+@stackchan_neck
 @patch.object(body_mod, "SWAY_EVERY", (0.05, 0.1))
 @patch.object(body_mod, "SWAY_REST", 0.05)
 @patch.object(config, "BODY_LANGUAGE", True)
@@ -152,6 +163,7 @@ async def _fast_sleep(t):
     await _REAL_SLEEP(min(t, 0.01))   # the 0.5 s lead-in wait too
 
 
+@stackchan_neck
 class DanceTests(unittest.TestCase):
     def test_four_routines_of_about_fifteen_seconds(self):
         self.assertEqual(sorted(DANCES), ["disco", "groove", "robot", "sprinkler"])
