@@ -6,7 +6,8 @@
 
 static const int SAMPLE_RATE = 16000;
 static const size_t RING_BYTES = 1024 * 1024;  // 32 s of audio, in PSRAM
-static const size_t MIN_PREBUFFER = 6400;      // 200 ms, if the size is unknown
+static const size_t MIN_PREBUFFER = 6400;      // 200 ms, if the size is unknown...
+static const size_t GAPPY_PREBUFFER = 19200;   // ...up to 600 ms while lines keep running dry
 static const size_t MAX_PREBUFFER = 32000;     // 1 s: never wait longer than this
 static const size_t CHUNK_SAMPLES = 512;       // 32 ms per playRaw()
 // M5Unified queues two buffers per channel; with a single producer, three
@@ -105,7 +106,7 @@ void Speaker::task() {
     size_t avail = available();
     if (!started) {
       // Buffer the whole line if it's short, else up to 1 s, before playing.
-      size_t want = expectedBytes_ ? min(expectedBytes_, MAX_PREBUFFER) : MIN_PREBUFFER;
+      size_t want = expectedBytes_ ? min(expectedBytes_, MAX_PREBUFFER) : prebufferBytes_;
       if (avail < want && !ended_) {
         vTaskDelay(pdMS_TO_TICKS(5));
         continue;
@@ -123,6 +124,14 @@ void Speaker::task() {
         if (mic_ != nullptr) mic_->reclaim();
         speaking_ = false;
         level_ = 0;
+        // The next line's head start: 100 ms more after a line that ran dry,
+        // back toward 200 ms (50 ms a line) after clean ones. Gaps cost more
+        // than the wait does. (From the original V2.)
+        if (underruns_ > 0) {
+          prebufferBytes_ = min(prebufferBytes_ + 3200, GAPPY_PREBUFFER);
+        } else if (prebufferBytes_ > MIN_PREBUFFER) {
+          prebufferBytes_ = max(prebufferBytes_ - 1600, MIN_PREBUFFER);
+        }
         if (onDone_) onDone_();
       } else {
         underruns_ = underruns_ + 1;  // ran dry mid-line: audible gap

@@ -442,6 +442,9 @@ void setup() {
 
   // M5Unified, the IO expander (servo power, LEDs), head touch, servos.
   M5StackChan.begin();
+  // The LED bars aren't used yet. After a full power-off they come up showing
+  // whatever is in the LED driver's memory, so switch them off.
+  M5StackChan.showRgbColor(0, 0, 0);
   M5StackChan.Motion.setAutoTorqueReleaseEnabled(SERVO_AUTO_RELAX);
   // Tracking streams small moves; re-reading the servo before each one stutters.
   M5StackChan.Motion.setAutoAngleSyncEnabled(false);
@@ -479,7 +482,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.5.1 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.5.2 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -537,7 +540,14 @@ void loop() {
 #endif
   if (speakDonePending) {
     speakDonePending = false;
-    brainLink.sendJson("{\"type\":\"speak_done\"}");
+    // With how it went, so the brain's log shows a voice that ran dry and the
+    // WiFi signal at the time.
+    char done[112];
+    snprintf(done, sizeof done,
+             "{\"type\":\"speak_done\",\"dry_ms\":%u,\"wait_ms\":%u,\"next_ms\":%u,\"rssi\":%d}",
+             static_cast<unsigned>(speaker.lastUnderruns() * 5), static_cast<unsigned>(speaker.lastPrebufferMs()),
+             static_cast<unsigned>(speaker.headStartMs()), static_cast<int>(WiFi.RSSI()));
+    brainLink.sendJson(done);
     Serial.printf("speech: %u underruns, prebuffered %u bytes in %u ms, wifi %d dBm\n",
                   speaker.lastUnderruns(), speaker.lastPrebuffered(),
                   speaker.lastPrebufferMs(), WiFi.RSSI());

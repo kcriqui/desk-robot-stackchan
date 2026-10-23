@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-static const char* FW_VERSION = "0.5.1";
+static const char* FW_VERSION = "0.5.2";
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
@@ -16,6 +16,11 @@ void Link::begin(const char* ssid, const char* pass, const char* host,
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);  // lower latency; main.cpp turns power saving on in deep sleep
+  // Hear every channel before joining, then pick the strongest access point
+  // with this name. The default stops at the first one it hears, which with a
+  // mesh or a second router can be a far one. (From the original V2.)
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
   WiFi.begin(ssid_, pass_);
   Serial.printf("wifi: joining \"%s\"...\n", ssid_);
 
@@ -36,9 +41,48 @@ void Link::update(uint32_t nowMs) {
     Serial.println(F("wifi: lost, retrying"));
     wifiReported_ = false;
   }
-  if (!wifiUp) return;  // the WiFi stack reconnects by itself
+  if (!wifiUp) {
+    // The WiFi stack rejoins by itself after most drops, but not after every
+    // failed join (in the original V2 it sat on "joining" for minutes after a
+    // reboot). So if it has been down for a while, start the join over.
+    if (wifiDownSinceMs_ == 0) {
+      wifiDownSinceMs_ = nowMs | 1;
+    } else if (nowMs - wifiDownSinceMs_ > 20000) {
+      Serial.printf("wifi: still not connected (status %d), joining \"%s\" again\n",
+                    static_cast<int>(WiFi.status()), ssid_);
+      WiFi.disconnect();
+      WiFi.begin(ssid_, pass_);
+      wifiDownSinceMs_ = nowMs | 1;
+    }
+    return;
+  }
+  wifiDownSinceMs_ = 0;
 
+  // Transmit power to suit the signal: sending is the radio's biggest draw,
+  // and full power is only needed far from the router. 11 dBm while the
+  // router comes in loud, full power again once it fades; the gap between the
+  // thresholds stops it flapping. RSSI is how loud the router is to us, which
+  // our own power doesn't change. (From the original V2.)
+  if (nowMs - lastTxCheckMs_ >= 5000) {
+    lastTxCheckMs_ = nowMs;
+    int rssi = WiFi.RSSI();
+    bool low = lowTxPower_ ? rssi > -62 : rssi >= -50;
+    if (rssi != 0 && low != lowTxPower_) {
+      lowTxPower_ = low;
+      WiFi.setTxPower(low ? WIFI_POWER_11dBm : WIFI_POWER_19_5dBm);
+      Serial.printf("wifi: signal %d dBm, transmit power %s\n", rssi, low ? "11 dBm (router close)" : "full");
+    }
+  }
+
+  // Each ws_.loop() reads at most one message. While a reply streams in (ten
+  // audio messages a second, plus heartbeat replies), one read per pass of
+  // loop() falls behind as soon as a pass also sends a camera frame: gaps in
+  // the voice, and a heartbeat reply stuck behind audio until the link gives
+  // up. So read everything that's waiting, for a few ms at most. (From the
+  // original V2.)
+  uint32_t t0 = millis();
   ws_.loop();
+  for (int i = 1; connected_ && i < 32 && millis() - t0 < 12; ++i) ws_.loop();
 }
 
 void Link::sendJson(const String& json) {

@@ -55,6 +55,12 @@ from .eyes import Eyes
 from .tracker import Tracker
 
 robot_socket: websockets.ServerConnection | None = None
+robot_peer = ""          # the connected robot's address
+robot_heard_at = 0.0     # when it last sent anything (it sends something every few seconds)
+_greeting = 0            # connections waiting to say hello
+MAX_GREETING = 8         # more than this at once is a flood: refused at once
+MIN_TOKEN_LEN = 16       # a shorter ROBOT_TOKEN (or the example's "change-me") is refused
+_bad_token = asyncio.Lock()  # wrong tokens wait out their second one at a time: no rapid guessing in parallel
 # The wake word the connected robot listens for itself (its hello says),
 # when WAKE_ON_ROBOT allows it; None = the brain listens for his name.
 robot_wake_word: str | None = None
@@ -129,15 +135,21 @@ def pick_mic_source() -> None:
 
 
 async def handle_robot(websocket: websockets.ServerConnection) -> None:
-    global robot_socket
+    global robot_socket, robot_peer, robot_heard_at, _greeting
     peer = websocket.remote_address[0] if websocket.remote_address else "?"
     # Anyone on the WiFi can reach this port, so the first message must be a
     # hello carrying the shared token from server/.env. Anything else is
-    # dropped without a reply.
+    # dropped without a reply. (The stricter checks are from the original V2.)
+    if _greeting >= MAX_GREETING:  # a flood of connections that never say hello
+        await websocket.close(1013)
+        return
+    _greeting += 1
     why = ""  # why the first message isn't a usable hello (never shows the token)
     try:
         first = await asyncio.wait_for(websocket.recv(), timeout=2)
-        if isinstance(first, str):
+        if isinstance(first, str) and len(first) > 4096:  # the robot's hello is ~150 bytes
+            hello, why = {}, f"first message too big for a hello ({len(first)} bytes)"
+        elif isinstance(first, str):
             hello = json.loads(first)
         else:
             hello = {}
@@ -148,12 +160,16 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         hello, why = {}, "first message wasn't JSON"
     except websockets.ConnectionClosed:
         hello, why = {}, "closed before saying hello"
+    finally:
+        _greeting -= 1
     if not isinstance(hello, dict):
         hello = {}  # "[1]", "42", "null" are valid JSON but not a hello
         why = why or "first message wasn't a JSON object"
     expected = os.environ.get("ROBOT_TOKEN", "")
-    if not expected:
-        print("(refusing robot: set ROBOT_TOKEN in server/.env and firmware/include/secrets.h)")
+    if len(expected) < MIN_TOKEN_LEN or expected == "change-me":  # the example's placeholder: everyone knows it
+        print(f"(refusing robot: set ROBOT_TOKEN in server/.env and the firmware's secrets.h to the same random "
+              f"string of at least {MIN_TOKEN_LEN} characters, e.g. from "
+              f"`python -c \"import secrets; print(secrets.token_hex(16))\"`)")
         await websocket.close(1008)
         return
     offered = str(hello.get("token", "")).encode()  # bytes: compare_digest rejects non-ASCII str
@@ -162,16 +178,25 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
             why = (f"first message was {str(hello.get('type'))[:20]!r}, not hello" if hello.get("type") != "hello"
                    else "wrong token")
         print(f"(refused a connection from {peer}: {why})")
+        async with _bad_token:  # a wrong token costs a second, one at a time
+            await asyncio.sleep(1)
         await websocket.close(1008)
         return
     if robot_socket is not None:
-        # It knows the token, so it's our robot back after a reboot (reset,
-        # power, an update over WiFi); the old connection just hasn't been
-        # noticed as dead yet. Refusing would keep him away until it times out.
+        # Our robot back after a reboot (reset, power, an update over WiFi)
+        # before its old connection is noticed as dead: it takes over if it
+        # comes from the same address, or the old link has gone quiet (a live
+        # robot sends something every few seconds). Anything else is a second
+        # robot, or someone else with the token, and is refused.
+        if peer != robot_peer and time.time() - robot_heard_at < 8:
+            print(f"(refused a second robot from {peer}: one is already connected)")
+            await websocket.close(1013)
+            return
         old, robot_socket = robot_socket, None
         print(f"(robot reconnected from {peer}: dropping the old connection)")
-        await old.close(1001)
+        asyncio.create_task(old.close(1001))
     robot_socket = websocket
+    robot_peer, robot_heard_at = peer, time.time()
     print(f"robot connected! (fw {hello.get('fw', '?')}, {peer})")
     global robot_wake_word, robot_asleep, powering_off, powered_off, robot_deep_sleep
     powering_off = False  # it powered back on (or never went)
@@ -202,6 +227,8 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     await send_to_robot({"type": "glance", "on": False})
     try:
         async for message in websocket:
+            if websocket is robot_socket:
+                robot_heard_at = time.time()
             if isinstance(message, bytes):
                 kind = message[:1]
                 if kind == b"\x01" and ears is not None and len(message) % 2 == 1:
@@ -223,6 +250,11 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
                 continue  # heartbeat every 5 s; not worth the console space
             if event.get("type") == "speak_done":
                 robot_speak_done.set()
+                dry, rssi, nxt = (event.get(k) for k in ("dry_ms", "rssi", "next_ms"))
+                if isinstance(dry, int) and dry > 0:  # firmware-stackchan 0.5.2+ says how it went
+                    num = lambda v: v if isinstance(v, int) else "?"  # numbers only into the log
+                    print(f"  (robot: the voice ran dry for {dry} ms; WiFi {num(rssi)} dBm; next reply "
+                          f"buffers {num(nxt)} ms first)")
                 continue
             if event.get("type") == "temp":
                 try:

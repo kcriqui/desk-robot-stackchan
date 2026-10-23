@@ -3,7 +3,11 @@
 The robot connects to `ws://<mac-ip>:8765`. The first message must be a
 `hello` carrying the shared `ROBOT_TOKEN` (server/.env, firmware secrets.h);
 the server drops anything else without replying, and allows one robot at a
-time. Plain `ws://` on the home LAN — no TLS in v1. Text frames are JSON. Binary
+time. A wrong token costs a second; a token shorter than 16 characters (or
+the example's `change-me`) is refused outright. If the robot connects again
+while its old connection is still open (a reboot or a replug), the new one
+replaces it when it comes from the same address or the old one has sent
+nothing for 8 s; otherwise it is refused (1013). Plain `ws://` on the home LAN — no TLS in v1. Text frames are JSON. Binary
 frames start with one type byte: `0x01` = mic audio, `0x02` = camera JPEG.
 The rest of the frame is the payload.
 
@@ -17,7 +21,10 @@ The rest of the frame is the payload.
 {"type": "temp", "c": 52.0}       // chip temperature, sent every ~10 s
 {"type": "battery", "v": 3.92, "ma": 410, "deep": false}  // firmware-stackchan: battery volts and mA (+ discharging,
                                   // - charging), every ~10 s; "deep" (0.5.1+): in deep sleep, also sent at once on a change
-{"type": "speak_done"}            // finished playing the last reply
+{"type": "speak_done", "dry_ms": 0, "wait_ms": 210, "next_ms": 200, "rssi": -58}
+                                  // finished playing the last reply: how long the audio ran dry mid-reply,
+                                  // how long it buffered before playing, the next reply's head start (ms),
+                                  // and the WiFi signal (dBm). firmware-stackchan before 0.5.2 sends only the type.
 {"type": "wake", "word": "computer"}  // heard its wake word while asleep: eyes open, and mic audio
                                   // follows, starting ~2 s before the word
 ```
@@ -65,8 +72,10 @@ live view is served by `server/brain/eyes.py` at http://localhost:8766/.
 
 Binary frames: type byte `0x01` then TTS audio for the speaker, same
 PCM format as above, ~100 ms per frame. The server streams each reply as
-the voice generates it (`bytes: 0`); the robot starts playing after 200 ms
-of audio is buffered and keeps a 32 s ring buffer in PSRAM. The server
+the voice generates it (`bytes: 0`); the robot starts playing once it has a
+head start buffered (firmware-stackchan 0.5.2+: 400 ms after power-on, up to
+600 ms after replies that ran dry, settling to 200 ms after clean ones;
+before that, always 200 ms) and keeps a 32 s ring buffer in PSRAM. The server
 waits for `speak_done` before it un-mutes the microphone.
 
 Firmware side: `firmware/src/link.cpp` maps each server message onto the

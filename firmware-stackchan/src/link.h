@@ -54,6 +54,9 @@ class Link {
   const char* token_ = "";
   bool connected_ = false;
   bool wifiReported_ = false;
+  uint32_t wifiDownSinceMs_ = 0;  // when WiFi was last seen down (0 = it is up)
+  uint32_t lastTxCheckMs_ = 0;    // transmit power: last look at the signal
+  bool lowTxPower_ = false;       // turned down because the router is close
   uint32_t nextStateMs_ = 0;
   const char* wakeWord_ = nullptr;
   std::function<bool()> asleep_;
