@@ -143,6 +143,7 @@ void setDeepSleep(bool on) {
     M5.Display.setBrightness(face.asleep() ? max(awakeBrightness / 4, 8) : awakeBrightness);
   }
   Serial.printf("power: deep sleep %s (%.2f V, %.0f mA)\n", on ? "on" : "off", batteryVolts, batteryMa);
+  nextTempMs = 0;  // tell the brain now (the battery report carries "deep")
 }
 
 // Shows why, waits for any speech to finish, and cuts the power.
@@ -478,7 +479,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.5.0 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.5.1 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -580,9 +581,9 @@ void loop() {
     nextTempMs = now + 10000;
     brainLink.sendJson(String("{\"type\":\"temp\",\"c\":") + String(temperatureRead(), 1) + "}");
     // The body's battery (INA226): volts, and mA (+ discharging, - charging).
-    char battery[64];
-    snprintf(battery, sizeof battery, "{\"type\":\"battery\",\"v\":%.2f,\"ma\":%.0f}",
-             batteryVolts, batteryMa);
+    char battery[80];
+    snprintf(battery, sizeof battery, "{\"type\":\"battery\",\"v\":%.2f,\"ma\":%.0f,\"deep\":%s}",
+             batteryVolts, batteryMa, deepSleep ? "true" : "false");
     brainLink.sendJson(battery);
   }
   if (brainLink.connected() && now >= nextStateMs) {

@@ -167,8 +167,10 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         await old.close(1001)
     robot_socket = websocket
     print(f"robot connected! (fw {hello.get('fw', '?')}, {peer})")
-    global robot_wake_word, robot_asleep, powering_off
+    global robot_wake_word, robot_asleep, powering_off, powered_off, robot_deep_sleep
     powering_off = False  # it powered back on (or never went)
+    powered_off = None
+    robot_deep_sleep = False
     offered = str(hello.get("wake") or "").strip().lower()
     robot_wake_word = offered if offered and config.WAKE_ON_ROBOT else None
     if robot_wake_word:
@@ -226,6 +228,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
                 await on_robot_wake(str(event.get("word") or "?"))
                 continue
             if event.get("type") == "battery":  # every ~10 s (firmware-stackchan)
+                robot_deep_sleep = bool(event.get("deep", False))
                 try:
                     eyes.battery = battery.Reading(float(event["v"]), float(event["ma"]), time.time())
                 except (KeyError, TypeError, ValueError):
@@ -886,6 +889,10 @@ def console_state() -> dict:
         "volume": speaker_volume,
         "tuning": {k: getattr(config, k) for k in TUNABLE},
         "battery_ma": eyes.battery.milliamps if eyes.battery is not None else None,
+        "deep_sleep": robot_socket is not None and robot_deep_sleep,
+        "wake_word": robot_wake_word,  # the robot's own ("computer"), or None: his name wakes him
+        "powered_off": ({"why": powered_off[0], "at": time.strftime("%H:%M", time.localtime(powered_off[1]))}
+                        if powered_off is not None and robot_socket is None else None),
         "memories": [{"id": f.id, "text": f.text, "added": f.added, "until": f.until} for f in memories.facts()],
     }
 
@@ -1190,18 +1197,22 @@ _ALERT_EMOTIONS = {
 
 
 powering_off = False  # the robot was told to power off; cleared when it says hello again
+robot_deep_sleep = False  # the robot's own deep sleep (on battery), from its battery reports
+powered_off: tuple[str, float] | None = None  # (why, when) we powered it off; None once it's back
 
 
 async def power_off(key: str) -> None:
     """Say goodbye, then have the robot power itself off (on battery, long
     asleep or nearly flat; alerts.PowerOffWatch). Only its power button
     turns it back on."""
-    global powering_off
+    global powering_off, powered_off, awake_until
     powering_off = True
     why = "battery" if key == "power_off_battery" else "idle"
     await announce(key, "sleepy")  # waits for any conversation, and for the words to finish playing
     print(f"(powering the robot off: {why})")
     await send_to_robot({"type": "power_off", "why": why})
+    powered_off = (why, time.time())
+    awake_until = 0.0  # the goodbye kept him "awake"; he's off
 
 
 async def watch_loop() -> None:

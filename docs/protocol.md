@@ -15,7 +15,8 @@ The rest of the frame is the payload.
                                   // "asleep": whether its eyes are shut, so a restarted brain keeps the state
 {"type": "state", "pan": 12.5, "emotion": "neutral"}
 {"type": "temp", "c": 52.0}       // chip temperature, sent every ~10 s
-{"type": "battery", "v": 3.92, "ma": 410}  // firmware-stackchan: battery volts and mA (+ discharging, - charging), every ~10 s
+{"type": "battery", "v": 3.92, "ma": 410, "deep": false}  // firmware-stackchan: battery volts and mA (+ discharging,
+                                  // - charging), every ~10 s; "deep" (0.5.1+): in deep sleep, also sent at once on a change
 {"type": "speak_done"}            // finished playing the last reply
 {"type": "wake", "word": "computer"}  // heard its wake word while asleep: eyes open, and mic audio
                                   // follows, starting ~2 s before the word

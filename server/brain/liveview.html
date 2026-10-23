@@ -385,7 +385,9 @@
       status = s;
       const linked = !!s.robot;
       $("linkdot").className = "dot" + (linked ? " on" : "");
-      $("link").textContent = linked ? "robot on WiFi" : "no robot";
+      const off = !linked && s.powered_off;  // we powered him off, vs. the link just dropped
+      const wakeHint = "say " + (s.wake_word ? "\u201c" + s.wake_word.charAt(0).toUpperCase() + s.wake_word.slice(1) + "\u201d" : "hey " + NAME);
+      $("link").textContent = linked ? "robot on WiFi" : off ? "powered off" : "no robot";
       $("fps").textContent = s.frame_age_s != null && s.frame_age_s < 3 ? s.fps + " fps" : "no signal";
       $("fps").className = "v" + (s.frame_age_s != null && s.frame_age_s < 3 ? "" : " warn");
       $("temp").textContent = s.temperature_c != null ? s.temperature_c.toFixed(1) + " °C" : "—";
@@ -393,9 +395,13 @@
       $("powerrow").hidden = !s.battery;  // only a StackChan reports one
       $("power").textContent = s.battery || "—";
       $("power").className = "v" + (s.battery_low ? " warn" : "");
-      $("state").textContent = s.speaking ? "speaking" : s.thinking ? "thinking" : s.awake ? "awake" : "asleep";
+      $("state").textContent = off ? "off (" + s.powered_off.why + ")" : s.speaking ? "speaking"
+        : s.thinking ? "thinking" : s.awake ? "awake" : s.deep_sleep ? "deep sleep" : "asleep";
       $("mic").textContent = s.listening ? (s.mic === "robot" ? "robot mic" : "Mac mic") : "off";
-      $("awakenote").textContent = s.awake ? "dozes off in " + Math.max(0, Math.round(s.awake_for)) + " s" : "asleep · say hey " + NAME;
+      $("awakenote").textContent = off ? "powered off at " + s.powered_off.at
+          + (s.powered_off.why === "battery" ? " (battery empty)" : " (idle)") + " · plug in USB or press his power button"
+        : s.awake ? "dozes off in " + Math.max(0, Math.round(s.awake_for)) + " s"
+        : s.deep_sleep ? "deep sleep: screen off, saving battery · " + wakeHint : "asleep · " + wakeHint;
 
       const fresh = s.frame_age_s != null && s.frame_age_s < 3;
       $("viewport").classList.toggle("dark", !fresh);
