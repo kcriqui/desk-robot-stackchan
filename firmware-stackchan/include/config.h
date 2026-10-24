@@ -20,7 +20,7 @@ constexpr float PAN_MIN_DEG = -120.0f;  // the BSP stops yaw at +/-128 (position
 constexpr float PAN_MAX_DEG = 120.0f;   // control ends there); keep a margin
 constexpr float TILT_MIN_DEG = 0.0f;    // level: the pitch servo's lower stop
 constexpr float TILT_MAX_DEG = 90.0f;   // straight up at the ceiling
-constexpr float TILT_REST_DEG = 20.0f;  // boot pose and `center`
+constexpr float TILT_REST_DEG = 25.0f;  // boot pose and `center`
 
 // Flip if `pan -30` turns the head to ITS right instead of its left, or if
 // `tilt 20` looks down. Both defaults checked on a StackChan (2026-10-17).

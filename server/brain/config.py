@@ -374,8 +374,8 @@ if BODY == "stackchan":
     TRACK_PAN_LIMIT = 120.0
     TRACK_TILT_MIN = 0.0   # level is as low as it goes
     TRACK_TILT_MAX = 90.0
-    TILT_REST = 20.0       # it sits on the desk below your eyes: rest looking a little up
-    TILT_WAKE = 20.0
+    TILT_REST = 25.0       # it sits on the desk below your eyes: rest looking a little up
+    TILT_WAKE = 25.0
     NOD = "up"
 TRACK_LOST_SECONDS = 4.0   # no face this long → idle glances resume
 
