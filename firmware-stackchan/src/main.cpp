@@ -15,6 +15,7 @@
 #include "face.h"
 #include "face_gfx.h"
 #include "idle_games.h"
+#include "light.h"
 #include "link.h"
 #include "mic.h"
 #include "wake.h"
@@ -50,9 +51,9 @@ Wake wake;
 Camera camera;
 ClockScreen clockScreen;
 // What the screen shows while it sleeps (on USB: on battery deep sleep turns it off): after a few seconds of the
-// sleeping face, the clock, an idle game, or Roam (still the sleeping face, the head looking round the room). At
-// night always
-// the clock (its night dimming). The brain picks one (Settings, the `screen` message).
+// sleeping face, the clock, an idle game, or Roam (still the sleeping face, the head looking round the room). In a
+// dark room the clock and the games dim (or go dark) with night mode, and Roam gives way to the clock so the head
+// doesn't whir about in the dark. The brain picks one (Settings, the `screen` message).
 enum class Shown : uint8_t { Face, Clock, Game, Roam };
 Shown shown = Shown::Face;
 IdleMode idleMode = IdleMode::Clock;
@@ -127,31 +128,51 @@ void applyMic() {
 }
 uint8_t awakeBrightness = 0;
 
-// Screen brightness and the clock screen at night: the brain's `screen` message (its Settings tab), kept in flash so
-// they hold with the brain away. Percents; face 0 = the display's own default, clock 0 = as bright as awake.
+// Screen brightness, the clock screen at night, and a hand to stop it talking: the brain's `screen` message (its Settings
+// tab), kept in flash so they hold with the brain away. Percents; face 0 = the display's own default, clock 0 = as
+// bright as awake. "Night" is the room going dark (the light sensor), not a time of day.
 struct ScreenSettings {
   uint8_t face = 0, clock = 0;
   uint8_t night = 0;          // 0 off, 1 dim, 2 dark (the screen off)
   uint8_t nightPct = 10;
-  uint16_t n0 = 23 * 60, n1 = 7 * 60;  // night from n0 to n1, minutes after midnight (it may span midnight)
+  uint16_t darkLux = 3;       // the room is dark below this (a lit room reads ~15 through the glass)
   uint8_t idle = 0;           // IdleMode: 0 clock, 1 pong, 2 tetris, 3 frogger, 4 roam, 5 life
+  uint8_t near = 1;           // a hand at the sensor stops it mid-reply
+  uint16_t nearLevel = 60;    // proximity reading (0-2047) that counts as near (nothing near: 0-5)
 } screenCfg;
+LightSensor light;
+bool roomDark = false;
+uint32_t darkSinceMs = 0, lightSinceMs = 0;
+
+// Dark once the light has stayed under darkLux for 5 s; light again once it's over twice that for 2 s. The gap
+// keeps the clock's own glow from flicking it back and forth.
+void updateDark(uint32_t now) {
+  if (!light.ok()) {
+    roomDark = false;
+    return;
+  }
+  float lx = light.lux();
+  if (lx < screenCfg.darkLux) {
+    lightSinceMs = 0;
+    if (!darkSinceMs) darkSinceMs = now | 1;
+    if (!roomDark && now - darkSinceMs >= 5000) roomDark = true;
+  } else if (lx > screenCfg.darkLux * 2.0f + 2) {
+    darkSinceMs = 0;
+    if (!lightSinceMs) lightSinceMs = now | 1;
+    if (roomDark && now - lightSinceMs >= 2000) roomDark = false;
+  } else {
+    darkSinceMs = lightSinceMs = 0;  // in between: stay as it is
+  }
+}
 uint8_t defaultBrightness = 0;   // the display's own, at boot
 uint8_t shownClockBrightness = 255;  // what the clock screen was last given
 uint32_t nextClockBrightMs = 0;
 
 uint8_t fromPct(uint8_t p) { return static_cast<uint8_t>(lroundf(constrain(p, 0, 100) * 2.55f)); }
 
-// The clock screen's brightness now: night's if it's night, else the clock's own, else as bright as awake (but
-// readable: at least 96).
-bool isNight() {
-  if (!screenCfg.night || !clockScreen.timeKnown()) return false;
-  time_t t = time(nullptr);
-  tm local;
-  localtime_r(&t, &local);
-  int m = local.tm_hour * 60 + local.tm_min;
-  return screenCfg.n0 <= screenCfg.n1 ? (m >= screenCfg.n0 && m < screenCfg.n1) : (m >= screenCfg.n0 || m < screenCfg.n1);
-}
+// The clock screen's brightness now: night's if the room is dark, else the clock's own, else as bright as awake
+// (but readable: at least 96).
+bool isNight() { return screenCfg.night && roomDark; }
 
 uint8_t clockBrightness() {
   if (isNight()) return screenCfg.night == 2 ? 0 : max(fromPct(screenCfg.nightPct), (uint8_t)1);
@@ -165,9 +186,10 @@ void loadScreen() {
   screenCfg.clock = p.getUChar("clock", screenCfg.clock);
   screenCfg.night = p.getUChar("night", screenCfg.night);
   screenCfg.nightPct = p.getUChar("nightPct", screenCfg.nightPct);
-  screenCfg.n0 = p.getUShort("n0", screenCfg.n0);
-  screenCfg.n1 = p.getUShort("n1", screenCfg.n1);
+  screenCfg.darkLux = p.getUShort("darkLux", screenCfg.darkLux);
   screenCfg.idle = p.getUChar("idle", screenCfg.idle);
+  screenCfg.near = p.getUChar("near", screenCfg.near);
+  screenCfg.nearLevel = p.getUShort("nearLvl", screenCfg.nearLevel);
   p.end();
 }
 
@@ -178,9 +200,10 @@ void saveScreen() {
   p.putUChar("clock", screenCfg.clock);
   p.putUChar("night", screenCfg.night);
   p.putUChar("nightPct", screenCfg.nightPct);
-  p.putUShort("n0", screenCfg.n0);
-  p.putUShort("n1", screenCfg.n1);
+  p.putUShort("darkLux", screenCfg.darkLux);
   p.putUChar("idle", screenCfg.idle);
+  p.putUChar("near", screenCfg.near);
+  p.putUShort("nearLvl", screenCfg.nearLevel);
   p.end();
 }
 
@@ -249,10 +272,12 @@ void roamUpdate(uint32_t now) {
 void printScreen() {
   static const char* kNight[] = {"off", "dim", "dark"};
   static const char* kIdle[] = {"clock", "pong", "tetris", "frogger", "roam", "life"};
-  Serial.printf("screen: face %u%% (0 = default), clock %u%% (0 = as awake), night %s %02u:%02u-%02u:%02u at %u%%, "
-                "idle %s\n", screenCfg.face, screenCfg.clock, kNight[min(screenCfg.night, (uint8_t)2)],
-                screenCfg.n0 / 60, screenCfg.n0 % 60, screenCfg.n1 / 60, screenCfg.n1 % 60, screenCfg.nightPct,
-                kIdle[min(screenCfg.idle, (uint8_t)5)]);
+  Serial.printf("screen: face %u%% (0 = default), clock %u%% (0 = as awake), night %s below %u lux at %u%% "
+                "(room %s), idle %s, wake when near %s (at %u)\n", screenCfg.face, screenCfg.clock,
+                kNight[min(screenCfg.night, (uint8_t)2)], screenCfg.darkLux, screenCfg.nightPct,
+                roomDark ? "dark" : "light", kIdle[min(screenCfg.idle, (uint8_t)5)], screenCfg.near ? "on" : "off",
+                screenCfg.nearLevel);
+  light.printStatus();
 }
 
 // Power on battery (config.h). Asleep on battery for DEEP_SLEEP_AFTER_MS, he
@@ -337,7 +362,7 @@ void printHelp() {
   Serial.println(F("               curious skeptical excited love confused"));
   Serial.println(F("  still <name>|off  hold one emotion still, to look at it (off: back to life)"));
   Serial.printf("  pan <deg>    turn head, %.0f..%.0f (0 = center, - = its left)\n", PAN_MIN_DEG, PAN_MAX_DEG);
-  Serial.printf("  tilt <deg>   tilt head, %.0f (level)..%.0f (up)\n", TILT_MIN_DEG, TILT_MAX_DEG);
+  Serial.printf("  tilt <deg>   tilt head, %.0f..%.0f (0 = level, 90 = straight up)\n", TILT_MIN_DEG, TILT_MAX_DEG);
   Serial.printf("  center       head straight ahead, tilted %.0f up (rest pose)\n", TILT_REST_DEG);
   Serial.println(F("  raw pan|tilt <deg>  calibration move that ignores the limits (watch it!)"));
   Serial.println(F("  speed <pan> [tilt]  neck speed 0-1000 until reboot (defaults in config.h)"));
@@ -360,6 +385,8 @@ void printHelp() {
   Serial.println(F("  poweroff     power off now (the power button turns him back on)"));
   Serial.println(F("  clock [tz [12|24]]  the clock screen's time zone (POSIX rule), or its status"));
   Serial.println(F("  weather <temp> <hi> <lo> <code> <day 0|1> <F|C> <words>  the clock screen's weather"));
+  Serial.println(F("  light        the light sensor: lux and proximity"));
+  Serial.println(F("  screen [...] brightness, night, idle screen and hand-to-stop settings (from the brain)"));
   Serial.println(F("  help         this text"));
 }
 
@@ -524,16 +551,17 @@ void handleCommand(String line) {
     }
     clockScreen.printStatus();
   } else if (cmd == "screen") {
-    // "screen <face %> <clock %> <night 0|1|2> <night start min> <night end min> <night %> [idle 0-5]"
-    int f, c, n, a, b, np, idle = screenCfg.idle;
-    if (sscanf(arg.c_str(), "%d %d %d %d %d %d %d", &f, &c, &n, &a, &b, &np, &idle) >= 6) {
-      screenCfg.idle = constrain(idle, 0, 5);
+    // "screen <face %> <clock %> <night 0|1|2> <dark below lux> <night %> <idle 0-5> <near 0|1> <near level>"
+    int f, c, n, lx, np, idle, nr, nl;
+    if (sscanf(arg.c_str(), "%d %d %d %d %d %d %d %d", &f, &c, &n, &lx, &np, &idle, &nr, &nl) == 8) {
       screenCfg.face = constrain(f, 0, 100);
       screenCfg.clock = constrain(c, 0, 100);
       screenCfg.night = constrain(n, 0, 2);
-      screenCfg.n0 = constrain(a, 0, 1439);
-      screenCfg.n1 = constrain(b, 0, 1439);
+      screenCfg.darkLux = constrain(lx, 1, 1000);
       screenCfg.nightPct = constrain(np, 1, 100);
+      screenCfg.idle = constrain(idle, 0, 5);
+      screenCfg.near = nr ? 1 : 0;
+      screenCfg.nearLevel = constrain(nl, 1, 2047);
       saveScreen();
       awakeBrightness = screenCfg.face ? fromPct(screenCfg.face) : defaultBrightness;
       if (!deepSleep && !face.asleep()) M5.Display.setBrightness(awakeBrightness);
@@ -541,6 +569,8 @@ void handleCommand(String line) {
       nextClockBrightMs = 0;
     }
     printScreen();
+  } else if (cmd == "light") {
+    light.printStatus();
   } else if (cmd == "weather") {
     if (!clockScreen.setWeather(arg)) Serial.println(F("usage: weather <temp> <hi> <lo> <code> <day 0|1> <F|C> <words>"));
   } else if (cmd == "poweroff") {
@@ -641,6 +671,7 @@ void setup() {
   face.begin();
   defaultBrightness = M5.Display.getBrightness();
   loadScreen();
+  light.begin();  // before the camera borrows the bus
   awakeBrightness = screenCfg.face ? fromPct(screenCfg.face) : defaultBrightness;
   M5.Display.setBrightness(awakeBrightness);
   panNeck.begin(ServoNeck::Axis::Pan, PAN_MIN_DEG, PAN_MAX_DEG, PAN_SPEED,
@@ -674,7 +705,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.6 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.4 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -745,6 +776,22 @@ void loop() {
                   speaker.lastUnderruns(), speaker.lastPrebuffered(),
                   speaker.lastPrebufferMs(), WiFi.RSSI());
   }
+  light.update(now);
+  updateDark(now);
+  static uint32_t proxSeen = 0;
+  static uint8_t nearReads = 0;
+  if (light.readings() != proxSeen) {
+    proxSeen = light.readings();
+    nearReads = light.proximity() >= screenCfg.nearLevel ? nearReads + 1 : 0;
+    // Two near readings in a row (0.2 s) while it's talking: a hand over the sensor stops it, now. The brain
+    // drops the rest of the reply.
+    if (nearReads >= 2 && screenCfg.near && speaker.speaking()) {
+      Serial.printf("hush: a hand (proximity %u): stopped talking\n", light.proximity());
+      speaker.stop();
+      brainLink.sendJson("{\"type\":\"hush\"}");
+      nearReads = 0;
+    }
+  }
   if (wake.takeDetection() && wakeOnRobot && brainConnected && face.asleep()) {
     // Heard the wake word: tell the brain, open his eyes, and stream from
     // 2 s back. The brain checks the transcript and puts him back to sleep
@@ -784,9 +831,11 @@ void loop() {
     nextTempMs = now + 10000;
     brainLink.sendJson(String("{\"type\":\"temp\",\"c\":") + String(temperatureRead(), 1) + "}");
     // The body's battery (INA226): volts, and mA (+ discharging, - charging).
-    char battery[80];
-    snprintf(battery, sizeof battery, "{\"type\":\"battery\",\"v\":%.2f,\"ma\":%.0f,\"deep\":%s}",
-             batteryVolts, batteryMa, deepSleep ? "true" : "false");
+    char battery[140];
+    snprintf(battery, sizeof battery,
+             "{\"type\":\"battery\",\"v\":%.2f,\"ma\":%.0f,\"deep\":%s,\"lux\":%.1f,\"prox\":%u,\"dark\":%s}",
+             batteryVolts, batteryMa, deepSleep ? "true" : "false", light.lux(), light.proximity(),
+             roomDark ? "true" : "false");
     brainLink.sendJson(battery);
   }
   if (brainLink.connected() && now >= nextStateMs) {
@@ -819,8 +868,9 @@ void loop() {
                 msSince(now, asleepSinceMs) >= SLEEP_FACE_MS;
     IdleMode mode = static_cast<IdleMode>(min(screenCfg.idle, (uint8_t)5));
     Shown want = !idle ? Shown::Face
-                 : (isNight() || mode == IdleMode::Clock) ? Shown::Clock
-                 : mode == IdleMode::Roam ? Shown::Roam : Shown::Game;
+                 : mode == IdleMode::Clock ? Shown::Clock
+                 : mode == IdleMode::Roam ? (isNight() ? Shown::Clock : Shown::Roam)
+                                          : Shown::Game;  // a game keeps playing in the dark, dimmed
     if (want == Shown::Game && games.mode() != mode) shown = Shown::Face;  // another game: start it afresh
     if (static_cast<int32_t>(now - nextStatusMs) >= 0) {
       nextStatusMs = now + 1000;

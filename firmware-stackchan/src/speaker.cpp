@@ -42,6 +42,7 @@ void Speaker::beginSpeech(size_t expectedBytes) {
   head_ = 0;
   tail_ = 0;
   ended_ = false;
+  stopped_ = false;
   expectedBytes_ = expectedBytes;
   underruns_ = 0;
   prebuffered_ = 0;
@@ -51,7 +52,7 @@ void Speaker::beginSpeech(size_t expectedBytes) {
 }
 
 void Speaker::feed(const uint8_t* pcm, size_t len) {
-  if (!speaking_ || ring_ == nullptr) return;
+  if (!speaking_ || stopped_ || ring_ == nullptr) return;
   portENTER_CRITICAL(&lock_);
   size_t used = (head_ + ringSize_ - tail_) % ringSize_;
   size_t space = ringSize_ - 1 - used;
@@ -102,6 +103,14 @@ void Speaker::task() {
       M5.Speaker.begin();
       M5.Speaker.setVolume(static_cast<uint8_t>(volume_ * 255));
       haveBus = true;
+    }
+    if (stopped_) {  // stop(): drop what's queued and finish as if the line had ended
+      M5.Speaker.stop(CHANNEL);
+      portENTER_CRITICAL(&lock_);
+      tail_ = head_;
+      portEXIT_CRITICAL(&lock_);
+      ended_ = true;
+      started = true;
     }
     size_t avail = available();
     if (!started) {

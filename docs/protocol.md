@@ -20,13 +20,17 @@ The rest of the frame is the payload.
 {"type": "state", "pan": 12.5, "emotion": "neutral"}
 {"type": "temp", "c": 52.0}       // chip temperature, sent every ~10 s
 {"type": "battery", "v": 3.92, "ma": 410, "deep": false}  // firmware-stackchan: battery volts and mA (+ discharging,
-                                  // - charging), every ~10 s; "deep" (0.5.1+): in deep sleep, also sent at once on a change
+                                  // - charging), every ~10 s; "deep" (0.5.1+): in deep sleep, also sent at once on a change;
+                                  // 0.6.7+ also "lux", "prox" (0-2047) and "dark" from its light sensor
 {"type": "speak_done", "dry_ms": 0, "wait_ms": 210, "next_ms": 200, "rssi": -58}
                                   // finished playing the last reply: how long the audio ran dry mid-reply,
                                   // how long it buffered before playing, the next reply's head start (ms),
                                   // and the WiFi signal (dBm). firmware-stackchan before 0.5.2 sends only the type.
 {"type": "wake", "word": "computer"}  // heard its wake word while asleep: eyes open, and mic audio
                                   // follows, starting ~2 s before the word
+{"type": "hush"}                  // 0.6.9.2+: a hand over its proximity sensor stopped it mid-reply (it has
+                                  // stopped its speaker; the brain drops the rest). 0.6.7-0.6.9 sent "near"
+                                  // instead, waking it
 ```
 
 Binary `0x01` frames: microphone audio, 16 kHz mono signed 16-bit PCM,
@@ -71,14 +75,18 @@ settle. The server takes either type.
                                   // 0.6.0+: the weather at home for the clock screen (WMO code), on connect
                                   // and every 30 min; the screen drops it after 3 h without an update.
 {"type": "weather", "none": true}  // 0.6.3+: no weather on the clock screen (switched off in Settings)
-{"type": "screen", "face": 0, "clock": 0, "night": 1, "n0": 1380, "n1": 420, "night_pct": 10}
-                                  // firmware-stackchan 0.6.3+: brightness in percent, awake (0 = the
-                                  // display's default) and on the clock (0 = as awake); at night (minutes
-                                  // after midnight, n0 to n1, may span midnight) the clock dims to night_pct
-                                  // (night 1) or goes dark (2); 0 = off. Kept in flash. Sent on connect.
-                                  // 0.6.4+ also "idle": what it shows while it sleeps on USB by day: 0 the
+{"type": "screen", "face": 0, "clock": 0, "night": 1, "dark_lux": 3, "night_pct": 10, "idle": 0,
+ "near": true, "near_level": 60}
+                                  // firmware-stackchan 0.6.7+: brightness in percent, awake (0 = the
+                                  // display's default) and on the clock (0 = as awake); in a dark room
+                                  // (light sensor under dark_lux) the clock dims to night_pct (night 1) or
+                                  // goes dark (2); 0 = off. near: a hand at its sensor (proximity
+                                  // near_level or more, 0-2047) stops it talking. Kept in flash. Sent on connect.
+                                  // (0.6.3-0.6.6 took n0 / n1, a night from / until in minutes.)
+                                  // 0.6.4+ also "idle": what it shows while it sleeps on USB: 0 the
                                   // clock, 1 Pong, 2 Tetris, 3 Frogger, 4 roam (the sleeping face, the head looking around),
-                                  // 5 Conway's Game of Life (0.6.5+).
+                                  // 5 Conway's Game of Life (0.6.5+). In the dark a game dims with night mode
+                                  // (0.6.9.3+; before, the clock took over); roam gives way to the clock.
                                   // Asleep for 5 s (not in deep sleep), the robot shows the clock screen.
 {"type": "power_off", "why": "idle"}  // firmware-stackchan 0.5.0+: power off ("idle" or "battery"); the
                                   // server says goodbye first. Only the power button turns it back on.

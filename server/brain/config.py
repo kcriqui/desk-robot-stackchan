@@ -410,8 +410,8 @@ if BODY == "stackchan":
     # never comes. 0.15 of the half-frame is about 4.5 deg.
     TRACK_DEADBAND = 0.15
     TRACK_PAN_LIMIT = 120.0
-    TRACK_TILT_MIN = 0.0   # level is as low as it goes
-    TRACK_TILT_MAX = 90.0
+    TRACK_TILT_MIN = 5.0   # the manual's safe range for the tilt servo (it can stall past it): 5 deg over level...
+    TRACK_TILT_MAX = 85.0  # ...to 5 short of straight up
     TILT_REST = 25.0       # it sits on the desk below your eyes: rest looking a little up
     TILT_WAKE = 25.0
     NOD = "up"
@@ -441,17 +441,21 @@ CLOCK_24H = os.environ.get("CLOCK_24H", "") == "1"
 CLOCK_WEATHER_MINUTES = 30
 CLOCK_WEATHER = True       # the weather on the clock screen
 # The robot's screen (StackChan firmware 0.6.3+), percent: awake (0 = the display's own default), the clock
-# (0 = as bright as awake), and at night the clock dims to NIGHT_BRIGHTNESS or goes dark. The live view's Settings
-# tab changes all of these (brain/settings.py).
+# (0 = as bright as awake), and at night the clock (or the idle game) dims to NIGHT_BRIGHTNESS or goes dark. Night is the room going
+# dark: its light sensor below DARK_LUX (firmware 0.6.7+). The live view's Settings tab changes all of these
+# (brain/settings.py), and shows the sensor's readings.
 SCREEN_BRIGHTNESS = 0
 CLOCK_BRIGHTNESS = 0
 NIGHT_MODE = "off"         # off | dim | dark
-NIGHT_START = "23:00"
-NIGHT_END = "07:00"
+DARK_LUX = 3               # its sensor reads a lit room as ~15 lux (through the glass); a dark one ~0
 NIGHT_BRIGHTNESS = 10
+# A hand held over its proximity sensor (right of the camera) while it talks stops it mid-reply: a reading of
+# NEAR_LEVEL or more, 0-2047 (firmware 0.6.9.2+; 0.6.7-0.6.9 woke it instead). Nothing near reads ~25.
+NEAR_STOP = True
+NEAR_LEVEL = 60
 # What the screen shows while it sleeps on USB (firmware 0.6.4+): the clock, a game that plays itself (Pong,
 # Tetris, Frogger, from V2; Conway's Game of Life), or roam (the sleeping face, the head looking round the room).
-# At night: the clock.
+# In the dark a game keeps playing, dimmed with night mode (firmware 0.6.9.3+); roam gives way to the clock.
 IDLE_SCREEN = "clock"
 
 # Facts he keeps for good (the remember / forget tools; memories.py). The

@@ -18,8 +18,10 @@
 // BODY=stackchan limits (server/brain/config.py) in step with these.
 constexpr float PAN_MIN_DEG = -120.0f;  // the BSP stops yaw at +/-128 (position
 constexpr float PAN_MAX_DEG = 120.0f;   // control ends there); keep a margin
-constexpr float TILT_MIN_DEG = 0.0f;    // level: the pitch servo's lower stop
-constexpr float TILT_MAX_DEG = 90.0f;   // straight up at the ceiling
+// M5's manual: keep the tilt servo within 5-85 deg; at the ends it can stall and be damaged for good (their own
+// firmware stops at 3-87 with stall protection). 0 is level, 90 straight up.
+constexpr float TILT_MIN_DEG = 5.0f;
+constexpr float TILT_MAX_DEG = 85.0f;
 constexpr float TILT_REST_DEG = 25.0f;  // boot pose and `center`
 
 // Flip if `pan -30` turns the head to ITS right instead of its left, or if
@@ -98,6 +100,7 @@ constexpr float ON_BATTERY_MA = 20.0f;
 constexpr bool CLOCK_SCREEN = true;
 constexpr uint32_t SLEEP_FACE_MS = 5000;
 // Its brightness, the face's and night dimming come from the brain (its Settings tab, the `screen` message).
+
 
 // ─── Behavior ────────────────────────────────────────────────────────────────
 constexpr uint32_t FRAME_INTERVAL_MS = 33;  // ~30 FPS face animation

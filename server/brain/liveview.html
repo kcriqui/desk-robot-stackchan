@@ -651,12 +651,14 @@
 
   // ── settings (from cgro00's V2 dashboard; brain/settings.py) ──────────
   // [section, key, label, help, control]. Controls: check, text, number, range:min:max, select:value=label,...,
-  // time, facepack, zone, place.
+  // facepack, zone, place.
   const SETTINGS_UI = [
     ["The robot", "", [
       ["robot", "human_name", "Your name", "what every character calls you; empty = HUMAN_NAME in server/.env", "text"],
       ["robot", "body_language", "Body language", "small head moves while it talks and waits", "check"],
       ["robot", "face_pack", "Face pack", "for characters that don't pick their own", "facepack"],
+      ["robot", "near_stop", "A hand stops it talking", "held over the sensor right of the camera", "check"],
+      ["robot", "near_level", "Near means", "", "number"],
     ]],
     ["Clock screen", "while it sleeps on USB", [
       ["clock", "h24", "24-hour clock", "", "check"],
@@ -669,14 +671,13 @@
       ["weather", "units", "Units", "", "select:fahrenheit=\u00b0F,celsius=\u00b0C"],
     ]],
     ["Screen", "firmware 0.6.5+", [
-      ["screen", "idle_screen", "While it sleeps", "on USB, by day; at night the clock",
+      ["screen", "idle_screen", "While it sleeps", "on USB; in the dark it dims (Roam: the clock)",
        "select:clock=the clock,pong=Pong,tetris=Tetris,frogger=Frogger,life=Game of Life,roam=Roam (asleep, looking round the room)"],
       ["screen", "brightness", "Brightness", "awake; 0 = the display's own", "range:0:100"],
       ["screen", "clock_brightness", "Clock brightness", "0 = as bright as awake", "range:0:100"],
-      ["screen", "night_mode", "At night the clock", "", "select:off=stays bright,dim=dims,dark=goes dark"],
-      ["screen", "night_start", "Night from", "", "time"],
-      ["screen", "night_end", "Until", "", "time"],
-      ["screen", "night_brightness", "Night brightness", "when it dims", "range:1:100"],
+      ["screen", "night_mode", "In the dark the screen", "the clock or the game", "select:off=stays bright,dim=dims,dark=goes dark"],
+      ["screen", "dark_lux", "Dark below", "lux", "number"],
+      ["screen", "night_brightness", "Dimmed to", "", "range:1:100"],
     ]],
   ];
   let settingsMeta = null;
@@ -725,9 +726,6 @@
         } else if (type === "number") {
           el = document.createElement("input"); el.type = "number";
           get = () => +el.value; set = v => { el.value = v; };
-        } else if (type === "time") {
-          el = document.createElement("input"); el.type = "time";
-          get = () => el.value; set = v => { el.value = v; };
         } else {   // text, zone, place: saved when you leave the box or press Enter
           el = document.createElement("input"); el.type = "text"; el.autocomplete = "off"; el.spellcheck = false;
           el.maxLength = type === "text" ? 40 : 80;
@@ -766,10 +764,18 @@
         if (c.type === "zone") c.small.textContent = "empty = the brain's (" + (settingsMeta.zone || "UTC") + ")";
         if (id === "robot.human_name") c.small.textContent = c.help + (s.default ? " (" + s.default + ")" : "");
       }
+      showLight(settingsMeta.light);
       const fw = settingsMeta.robot_fw;
       document.querySelector("#settingsbox .card:nth-child(4) .sub").textContent =
-        "firmware 0.6.5+" + (fw ? " · the robot has " + fw : " · no robot connected");
+        "firmware 0.6.7+" + (fw ? " · the robot has " + fw : " · no robot connected");
     } catch (e) { toast(e.message, true); }
+  }
+  // The sensor's readings beside its two settings, so the levels can be picked from what it sees (every ~10 s).
+  function showLight(l) {
+    const lux = setCtl["screen.dark_lux"], near = setCtl["robot.near_level"];
+    if (!lux || !near) return;
+    lux.small.textContent = l ? `lux · the room now: ${Math.round(l.lux)} lux, ${l.dark ? "dark" : "light"}` : "lux · no reading yet";
+    near.small.textContent = l ? `0-2047, nearer is higher · now: ${l.prox}` : "0-2047, nearer is higher";
   }
   buildSettings();
 
@@ -1064,6 +1070,7 @@
       showCharacters(s.characters, s.character);
       if (s.character && cstate.meta && s.character !== cstate.active) loadChars();
       showName(s.name);
+      if (!$("p-settings").hidden) showLight(s.light);
       showPronouns(s.pronouns);
       for (const b of faces.children) b.classList.toggle("active", b.dataset.emotion === s.emotion);
       $("trackbtn").classList.toggle("active", !!s.tracking_enabled);

@@ -27,6 +27,9 @@ class Speaker {
   void beginSpeech(size_t expectedBytes = 0);
   void feed(const uint8_t* pcm, size_t len);
   void endSpeech();
+  // Stop now, mid-line: the queued audio is dropped and whatever the brain is still sending is ignored until the
+  // next beginSpeech(). The usual done handler runs (the brain hears speak_done).
+  void stop() { stopped_ = true; }
   bool speaking() const { return speaking_; }
   void setVolume(float v);
   // Loudness (RMS 0..1) of the audio being played right now; 0 when silent.
@@ -55,6 +58,7 @@ class Speaker {
   volatile size_t tail_ = 0;  // read index
   volatile bool speaking_ = false;
   volatile bool ended_ = false;
+  volatile bool stopped_ = false;
   size_t expectedBytes_ = 0;
   volatile uint32_t underruns_ = 0;   // 5 ms polls that found the buffer dry mid-line
   size_t prebufferBytes_ = 12800;     // 400 ms

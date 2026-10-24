@@ -74,6 +74,7 @@ heard: asyncio.Queue[tuple[str, float, float, float]] = asyncio.Queue()
 speech_started = asyncio.Event()  # the human began a new turn (set by the ears)
 awake_until = 0.0  # while time.time() < this, he's awake: no wake word needed
 robot_speak_done = asyncio.Event()  # robot finished playing the last reply
+speaking_reply = None  # the SpokenReply being thought and spoken (converse), so a hush can stop it
 eyes = Eyes()
 head_moves: asyncio.Queue[tuple[float | None, float | None, bool]] = asyncio.Queue()
 tracker: Tracker | None = None
@@ -201,7 +202,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     robot_peer, robot_heard_at = peer, time.time()
     global robot_fw
     try:
-        robot_fw = tuple(int(x) for x in str(hello.get("fw", "0")).split(".")[:3])
+        robot_fw = tuple(int(x) for x in str(hello.get("fw", "0")).split(".")[:4])  # 0.6.9.1: four parts
     except ValueError:
         robot_fw = (0, 0, 0)
     print(f"robot connected! (fw {hello.get('fw', '?')}, {peer})")
@@ -276,12 +277,17 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
             if event.get("type") == "wake":  # the robot heard its wake word
                 await on_robot_wake(str(event.get("word") or "?"))
                 continue
+            if event.get("type") == "hush":  # a hand over its sensor stopped it talking (firmware 0.6.9.2+)
+                on_robot_hush()
+                continue
             if event.get("type") == "battery":  # every ~10 s (firmware-stackchan)
                 robot_deep_sleep = bool(event.get("deep", False))
                 try:
                     eyes.battery = battery.Reading(float(event["v"]), float(event["ma"]), time.time())
                 except (KeyError, TypeError, ValueError):
                     pass  # malformed; leave the last reading
+                if "lux" in event:  # its light sensor (0.6.7+), for the Settings tab
+                    eyes.light = {"lux": event.get("lux"), "prox": event.get("prox"), "dark": event.get("dark")}
                 continue
             print(f"robot: {event}")
     except websockets.ConnectionClosed:
@@ -881,6 +887,11 @@ class SpokenReply:
         self.tl.mark("done")
         return True
 
+    def stop(self) -> None:
+        """Hushed mid-reply: no more words (the robot has dropped what it had)."""
+        if not self.cancel.is_set():
+            self._abort()
+
     def _abort(self) -> None:
         self.cancel.set()
         brain.abandon()
@@ -954,7 +965,8 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
         jpeg = await fresh_frame()  # e.g. just woken: the camera was paused
     if camera_wanted and jpeg is None:
         print("  (camera has no fresh frame — telling him he can't see right now)")
-    reply = SpokenReply(loop, tl)
+    global speaking_reply
+    reply = speaking_reply = SpokenReply(loop, tl)
     reply.think_and_speak(question, jpeg, camera_wanted)
     if body is not None:
         body.ponder()  # a glance up while he thinks
@@ -968,6 +980,7 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
         finished = True
     finally:
         thinking = False
+        speaking_reply = None  # done: a hush now (an announcement) has no reply to stop
     switch_to, pending_character = pending_character, None
     if not finished:
         if body is not None:
@@ -1083,6 +1096,7 @@ def console_state() -> dict:
         "emotions": config.EMOTIONS,
         "name": personality.name(),
         "pronouns": personality.CHARACTER.pronouns,
+        "light": eyes.light,
         "character": personality.CHARACTER.id,
         "characters": [{"id": c.id, "name": personality.name(c)} for c in characters()],
         "face_pack": face_pack if config.BODY == "stackchan" else None,
@@ -1181,6 +1195,7 @@ async def _console_command(action: str, payload: dict) -> dict:
         print(f"console: {key} = {value:g} (kept in server/data/settings.json)")
     elif action == "settings":  # the Settings tab: every setting, its default, and whether it was changed
         return {"settings": settings.current(speaker_volume), "face_packs": [p["id"] for p in face_packs()],
+                "light": eyes.light,
                 "zone": clock._zone_name(), "robot_fw": ".".join(map(str, robot_fw)) if robot_socket else None}
     elif action == "setting":
         return await change_setting(str(payload.get("section", "")), str(payload.get("key", "")), payload.get("value"))
@@ -1429,6 +1444,16 @@ async def on_robot_wake(word: str) -> None:
             tracker.note_pose(tilt=config.TILT_WAKE)
 
 
+def on_robot_hush() -> None:
+    """A hand over the robot's sensor stopped it mid-reply (it has already stopped its speaker): drop the rest of
+    the reply, as when you talk over it, and stay awake to listen."""
+    global awake_until
+    print("(a hand stopped the robot talking)")
+    awake_until = time.time() + config.AWAKE_SECONDS
+    if speaking_reply is not None:
+        speaking_reply.stop()
+
+
 async def back_to_sleep(why: str) -> None:
     """A false wake: eyes shut again, no announcement."""
     global awake_until, robot_woke_at
@@ -1534,7 +1559,7 @@ async def change_setting(section: str, key: str, value) -> dict:
         await send_face_pack()
     elif section == "clock" or section == "weather":
         asyncio.create_task(send_clock())  # the time zone and style, then the weather (fetched)
-    elif section == "screen":
+    elif section == "screen" or key in ("near_stop", "near_level"):
         await send_screen()
     elif section == "listening" and ears is not None:
         ears.apply_config()
@@ -1547,7 +1572,7 @@ async def send_screen() -> None:
         return
     await send_to_robot({"type": "screen", "face": config.SCREEN_BRIGHTNESS, "clock": config.CLOCK_BRIGHTNESS,
                          "night": ("off", "dim", "dark").index(config.NIGHT_MODE),
-                         "n0": settings.minutes(config.NIGHT_START), "n1": settings.minutes(config.NIGHT_END),
+                         "dark_lux": config.DARK_LUX, "near": config.NEAR_STOP, "near_level": config.NEAR_LEVEL,
                          "night_pct": config.NIGHT_BRIGHTNESS,
                          "idle": ("clock", "pong", "tetris", "frogger", "roam", "life").index(config.IDLE_SCREEN)})
 

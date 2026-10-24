@@ -38,7 +38,7 @@ def run(coro):
 
 
 # A StackChan's neck (BODY=stackchan in server/.env), whatever the .env says.
-STACKCHAN_NECK = {"TRACK_TILT_MIN": 0.0, "TRACK_TILT_MAX": 90.0, "TILT_REST": 20.0, "TRACK_PAN_LIMIT": 120.0}
+STACKCHAN_NECK = {"TRACK_TILT_MIN": 5.0, "TRACK_TILT_MAX": 85.0, "TILT_REST": 20.0, "TRACK_PAN_LIMIT": 120.0}
 
 
 def stackchan_neck(cls):

@@ -42,6 +42,7 @@ class Eyes:
         self._fps_window: list[float] = []
         self.temperature: float | None = None
         self.battery = None  # battery.Reading, on a StackChan
+        self.light = None    # its light sensor: {"lux", "prox", "dark"}, every ~10 s (firmware 0.6.7+)
         self.last_heard = ""
         self.last_said = ""
         # main.py plugs in: extra /status fields, and the handler for /api/<action>.

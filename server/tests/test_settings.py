@@ -34,7 +34,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(json.loads(self.path.read_text()), {"screen": {"night_mode": "dim"}})
 
     def test_values_are_checked(self):
-        for sec, key, bad in (("screen", "night_start", "25:00"), ("screen", "brightness", 150),
+        for sec, key, bad in (("screen", "dark_lux", 0), ("screen", "brightness", 150), ("robot", "near_level", 5000),
                               ("weather", "units", "kelvin"), ("clock", "h24", "yes"), ("robot", "awake_seconds", True),
                               ("nope", "x", 1), ("robot", "human_name", "x" * 41)):
             with self.assertRaises(ValueError, msg=(sec, key, bad)):
@@ -65,7 +65,6 @@ class SettingsTests(unittest.TestCase):
             raise
         settings.change("clock", "timezone", "PST8PDT,M3.2.0,M11.1.0")   # a rule passes as it is
         self.assertEqual(clock.posix_tz(), "PST8PDT,M3.2.0,M11.1.0")
-        self.assertEqual(settings.minutes("23:30"), 1410)
 
 
 if __name__ == "__main__":

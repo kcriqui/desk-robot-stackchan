@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-static const char* FW_VERSION = "0.6.6";
+static const char* FW_VERSION = "0.6.9.4";
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
@@ -188,7 +188,8 @@ void Link::handleMessage(const char* json) {
     cmd = String("clock ") + (doc["tz"] | "UTC0") + ((doc["h24"] | false) ? " 24" : " 12");
   } else if (!strcmp(type, "screen")) {
     cmd = String("screen ") + (doc["face"] | 0) + " " + (doc["clock"] | 0) + " " + (doc["night"] | 0) + " " +
-          (doc["n0"] | 1380) + " " + (doc["n1"] | 420) + " " + (doc["night_pct"] | 10) + " " + (doc["idle"] | 0);
+          (doc["dark_lux"] | 3) + " " + (doc["night_pct"] | 10) + " " + (doc["idle"] | 0) + " " +
+          ((doc["near"] | true) ? 1 : 0) + " " + (doc["near_level"] | 60);
   } else if (!strcmp(type, "weather") && (doc["none"] | false)) {
     cmd = "weather none";
   } else if (!strcmp(type, "weather")) {

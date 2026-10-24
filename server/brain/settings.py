@@ -10,7 +10,6 @@ flash (the `clock` and `screen` messages), so they hold with the brain away.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 from . import config
@@ -18,13 +17,15 @@ from . import config
 PATH = Path(__file__).resolve().parent.parent / "data" / "settings.json"
 
 # section: {key: (config attribute, kind, extra)}. kind: bool, int, float, str (extra = max length), choice (extra =
-# the choices), time ("HH:MM"). int / float extra = (min, max). A None attribute is the brain's own (main.py).
+# the choices). int / float extra = (min, max). A None attribute is the brain's own (main.py).
 SCHEMA: dict[str, dict[str, tuple]] = {
     "robot": {
         "human_name":    ("HUMAN_NAME", "str", 40),
         "awake_seconds": ("AWAKE_SECONDS", "float", (10.0, 600.0)),
         "volume":        (None, "float", (0.0, 1.0)),
         "body_language": ("BODY_LANGUAGE", "bool", None),
+        "near_stop":     ("NEAR_STOP", "bool", None),        # a hand over the sensor stops it talking
+        "near_level":    ("NEAR_LEVEL", "int", (1, 2047)),   # the proximity reading that counts as near
         "character":     ("CHARACTER", "str", 40),       # remembered when switched
         "face_pack":     ("FACE_PACK", "str", 48),       # for characters that don't choose one
     },
@@ -42,8 +43,7 @@ SCHEMA: dict[str, dict[str, tuple]] = {
         "brightness":    ("SCREEN_BRIGHTNESS", "int", (0, 100)),        # 0 = the display's own default
         "clock_brightness": ("CLOCK_BRIGHTNESS", "int", (0, 100)),      # 0 = as bright as awake
         "night_mode":    ("NIGHT_MODE", "choice", ("off", "dim", "dark")),
-        "night_start":   ("NIGHT_START", "time", None),
-        "night_end":     ("NIGHT_END", "time", None),
+        "dark_lux":      ("DARK_LUX", "int", (1, 1000)),     # the room is dark below this (the light sensor)
         "night_brightness": ("NIGHT_BRIGHTNESS", "int", (1, 100)),
         "idle_screen":   ("IDLE_SCREEN", "choice", ("clock", "pong", "tetris", "frogger", "roam", "life")),
     },
@@ -59,7 +59,6 @@ SCHEMA: dict[str, dict[str, tuple]] = {
     },
 }
 VOLUME_DEFAULT = 0.7  # the firmware's SPEAKER_VOLUME
-_TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 # What config.py and server/.env say, before any saved setting: the defaults to go back to.
 DEFAULTS = {sec: {k: (getattr(config, a) if a else VOLUME_DEFAULT) for k, (a, _, _) in keys.items()}
             for sec, keys in SCHEMA.items()}
@@ -88,10 +87,6 @@ def clean_value(section: str, key: str, value):
     if kind == "choice":
         if value not in extra:
             raise ValueError(f"{key} must be one of: {', '.join(extra)}")
-        return value
-    if kind == "time":
-        if not isinstance(value, str) or not _TIME.match(value):
-            raise ValueError(f"{key} must be a time like 07:30")
         return value
     if not isinstance(value, str):
         raise ValueError(f"{key} must be text")
@@ -172,7 +167,3 @@ def current(volume: float) -> dict:
                            "kind": kind, "extra": list(extra) if isinstance(extra, tuple) else extra}
     return out
 
-
-def minutes(hhmm: str) -> int:
-    h, m = hhmm.split(":")
-    return int(h) * 60 + int(m)
