@@ -13,6 +13,9 @@ A pack is one JSON file. The built-in ones are in server/faces/ (in the repo); y
       "glint": true, "mouth": "talk",       pupils that look around; mouth: talk | always | never
       "color": "#F4F1EA",                   the eyes' colour (each emotion may have its own "color")
       "asleep": {eye},                      the shut eyes while sleeping
+      "plate": {panel}, "socket": {panel},  a face behind the eyes and the socket an eye sits in (optional)
+      "lens": {"w": 4, "color": "#2B323A"}, a ring round a cyclops eye, moving with it (optional)
+      "pupil": "#FFF3C4",                   the pupils' colour (optional; dark if not given)
       "emotions": {
         "happy": {eye, "right": {eye}, "fx": ["blush"], "gaze": [0, 0], "pop": 0.12, "smile": 0},
         ...
@@ -22,7 +25,9 @@ A pack is one JSON file. The built-in ones are in server/faces/ (in the repo); y
 An eye is any of: w h (size), rt rb (corner rounding, top / bottom), st sb (edge slant, top / bottom: + tilts the
 inner corner in, - the outer), lid (upper lid droop), cheek (lower lid push-up, a happy crescent), dx dy (offset,
 + = outward / down). "right" changes the right eye only (as you look at the screen); without it both eyes match.
-Anything left out takes the default. Standard library only (the launcher imports it).
+Anything left out takes the default. A panel is a rounded box centred on the screen, in face pixels like the eyes
+(the face is 128 x 64 of them across the middle of a StackChan's screen; a plate may be up to 96 tall, the whole
+screen): w h r, rim (a darker edge this thick), color, rim_color. Standard library only (the launcher imports it).
 """
 
 from __future__ import annotations
@@ -83,6 +88,19 @@ def _eye(d, where):
     return {k: _num(d[k], lo, hi, f"{where}.{k}") for k, (_, lo, hi) in EYE_KEYS.items() if k in d}
 
 
+def _panel(d, where, max_h):
+    if not isinstance(d, dict):
+        raise ValueError(f"{where} must be an object")
+    out = {"w": _num(d.get("w", 0), 0, 128, f"{where}.w"), "h": _num(d.get("h", 0), 0, max_h, f"{where}.h"),
+           "r": _num(d.get("r", 0), 0, 48, f"{where}.r")}
+    if "rim" in d:
+        out["rim"] = _num(d["rim"], 0, 8, f"{where}.rim")
+    for k in ("color", "rim_color"):
+        if k in d:
+            out[k] = _color(d[k], f"{where}.{k}")
+    return out
+
+
 def clean(pack) -> dict:
     """The pack, checked: known keys only, numbers in range. Raises ValueError with a message for the dashboard."""
     if not isinstance(pack, dict):
@@ -104,6 +122,18 @@ def clean(pack) -> dict:
     if "color" in pack:
         out["color"] = _color(pack["color"], "color")
     out["asleep"] = _eye(pack.get("asleep"), "asleep")
+    for k, max_h in (("plate", 96), ("socket", 64)):
+        if pack.get(k) is not None:
+            out[k] = _panel(pack[k], k, max_h)
+    if pack.get("lens") is not None:
+        lens = pack["lens"]
+        if not isinstance(lens, dict):
+            raise ValueError("lens must be an object")
+        out["lens"] = {"w": _num(lens.get("w", 0), 0, 20, "lens.w")}
+        if "color" in lens:
+            out["lens"]["color"] = _color(lens["color"], "lens.color")
+    if "pupil" in pack:
+        out["pupil"] = _color(pack["pupil"], "pupil")
     emos = pack.get("emotions") or {}
     if not isinstance(emos, dict):
         raise ValueError("emotions must be an object")

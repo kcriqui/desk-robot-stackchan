@@ -27,6 +27,10 @@ class FaceGfx {
     TEAR = 5,
     HEART = 6,
     STEAM = 7,
+    PLATE = 8,   // a pack's face plate, its rim, its eye socket and lens (Face's panels)
+    RIM = 9,
+    SOCKET = 10,
+    LENS = 11,
   };
 
   // bg: RGB888 background (the rest of the screen too).
@@ -38,6 +42,10 @@ class FaceGfx {
 
   int width() const { return canvas_.width(); }    // screen pixels
   int height() const { return canvas_.height(); }
+  int bandY() const { return bandY_; }             // where the band starts on the screen
+  uint32_t background() const { return bg_; }
+  // Straight onto the screen, outside the band (row y of the band's coordinates, so < 0 is above it).
+  void screenSpan(int y, int x0, int x1, uint32_t rgb888);
 
   // Screen-pixel drawing.
   void span(int y, int x0, int x1, uint8_t ink);  // pixels x0 .. x1-1 of row y

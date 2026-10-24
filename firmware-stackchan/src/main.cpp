@@ -664,6 +664,7 @@ void loop() {
         M5.Display.setBrightness(CLOCK_BRIGHTNESS ? CLOCK_BRIGHTNESS : max(awakeBrightness, (uint8_t)96));
       } else {
         M5.Display.fillScreen(BACKGROUND_COLOR);
+        face.redrawBackdrop();
       }
     } else if (clockShown) {
       clockScreen.draw(now, false);  // only what changed (once a minute, or new weather)

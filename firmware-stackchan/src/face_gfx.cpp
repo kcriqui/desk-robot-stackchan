@@ -21,6 +21,14 @@ void FaceGfx::begin() {
   bandY_ = (M5.Display.height() - canvas_.height()) / 2;
 }
 
+void FaceGfx::screenSpan(int y, int x0, int x1, uint32_t rgb) {
+  int sy = bandY_ + y;
+  x0 = max(x0, 0);
+  x1 = min(x1, static_cast<int>(M5.Display.width()));
+  if (sy < 0 || sy >= M5.Display.height() || x1 <= x0) return;
+  M5.Display.drawFastHLine(x0, sy, x1 - x0, M5.Display.color565(rgb >> 16, (rgb >> 8) & 0xFF, rgb & 0xFF));
+}
+
 void FaceGfx::span(int y, int x0, int x1, uint8_t ink) {
   if (y < 0 || y >= static_cast<int>(canvas_.height())) return;
   x0 = max(x0, 0);

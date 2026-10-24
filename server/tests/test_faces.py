@@ -43,6 +43,18 @@ class FacePackTests(unittest.TestCase):
         rocky = faces.load("rocky")
         self.assertEqual(rocky["emotions"]["sad"]["color"], "#8FB8FF")   # in step with the firmware's own
 
+    def test_plate_socket_lens_and_pupil(self):
+        p = faces.clean({"cyclops": True, "pupil": "#fff3c4",
+                         "plate": {"w": 50, "h": 92, "r": 18, "rim": 1.5, "color": "#DCE3E6", "rim_color": "#7F8A90"},
+                         "socket": {"w": 28, "h": 52, "r": 14, "color": "#101418"}, "lens": {"w": 4}})
+        self.assertEqual((p["plate"]["h"], p["socket"]["w"], p["lens"], p["pupil"]), (92, 28, {"w": 4}, "#FFF3C4"))
+        self.assertNotIn("plate", faces.clean({}))                          # none unless a pack has one
+        for bad in ({"plate": {"h": 120}},              # taller than the screen
+                    {"socket": {"h": 80}},              # a socket stays in the face's band
+                    {"plate": {"color": "white"}}, {"lens": {"w": 30}}, {"pupil": "yellow"}, {"plate": 5}):
+            with self.assertRaises(ValueError, msg=bad):
+                faces.clean(bad)
+
     def test_bad_packs_are_refused(self):
         for bad in ({"emotions": {"grumpy": {}}}, {"emotions": {"happy": {"w": 500}}},
                     {"emotions": {"happy": {"fx": ["lasers"]}}}, {"mouth": "huge"}, {"glint": "yes"}, []):

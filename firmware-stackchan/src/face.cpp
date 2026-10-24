@@ -118,6 +118,16 @@ int32_t readColor(JsonVariantConst v, int32_t fallback) {
   return (end && *end == 0) ? static_cast<int32_t>(c) : fallback;
 }
 
+void readPanel(JsonObjectConst o, Panel& p, float maxH) {
+  if (o.isNull()) return;
+  p.w = constrain(o["w"] | 0.0f, 0.0f, 128.0f);
+  p.h = constrain(o["h"] | 0.0f, 0.0f, maxH);
+  p.r = constrain(o["r"] | 0.0f, 0.0f, 48.0f);
+  p.rim = constrain(o["rim"] | 0.0f, 0.0f, 8.0f);
+  p.color = static_cast<uint32_t>(readColor(o["color"], 0xD8DDDF));
+  p.rimColor = static_cast<uint32_t>(readColor(o["rim_color"], 0x8E989E));
+}
+
 }  // namespace
 
 const char* emotionName(Emotion e) { return kEmotionNames[static_cast<uint8_t>(e)]; }
@@ -151,6 +161,11 @@ bool Face::applyPackJson(const char* json, bool save) {
   n.mouth = !strcmp(mouth, "always") ? 1 : !strcmp(mouth, "never") ? 2 : 0;
   n.color = static_cast<uint32_t>(readColor(p["color"], static_cast<int32_t>(n.color)));
   readEye(p["asleep"], n.asleep);
+  readPanel(p["plate"], n.plate, 96.0f);
+  readPanel(p["socket"], n.socket, 64.0f);
+  n.lens = constrain(p["lens"]["w"] | 0.0f, 0.0f, 20.0f);
+  n.lensColor = static_cast<uint32_t>(readColor(p["lens"]["color"], 0x2B323A));
+  n.pupil = readColor(p["pupil"], -1);
   JsonObjectConst emos = p["emotions"];
   for (int i = 0; i < static_cast<int>(Emotion::COUNT); ++i) {
     JsonObjectConst e = emos[kEmotionNames[i]];
@@ -175,6 +190,12 @@ bool Face::applyPackJson(const char* json, bool save) {
     }
   }
   pack_ = n;
+  gfx_.setInk(FaceGfx::PLATE, n.plate.color);
+  gfx_.setInk(FaceGfx::RIM, n.plate.rimColor);
+  gfx_.setInk(FaceGfx::SOCKET, n.socket.color);
+  gfx_.setInk(FaceGfx::LENS, n.lensColor);
+  gfx_.setInk(FaceGfx::PUPIL, n.pupil >= 0 ? static_cast<uint32_t>(n.pupil) : 0x0A0C12);
+  backdropDirty_ = true;  // a plate came, went or changed: above and below the band too
   Emotion e = emotion_;
   emotion_ = Emotion::COUNT;  // force setEmotion to pick up the new look
   setEmotion(e);
@@ -726,8 +747,74 @@ void Face::drawZeds() {
   }
 }
 
+namespace {
+// Row sy (the band's screen rows; < 0 or past its height = off it) of a box centred on the screen: [a, b) in
+// screen pixels, false if the row misses it. The band and the screen around it both draw plates with this, so
+// they meet without a seam.
+bool boxRow(float w, float h, float r, int sy, int& a, int& b) {
+  if (w <= 0 || h <= 0) return false;
+  float x = SCREEN_W * 0.5f - w * 0.5f, y = SCREEN_H * 0.5f - h * 0.5f;
+  r = fminf(r, fminf(w, h) * 0.5f);
+  float py = (sy + 0.5f) / S - y;
+  if (py < 0 || py >= h) return false;
+  float inset = 0;
+  if (py < r || py > h - r) {
+    float d = py < r ? r - py : py - (h - r);
+    inset = r - sqrtf(fmaxf(0, r * r - d * d));
+  }
+  a = lroundf((x + inset) * S);
+  b = lroundf((x + w - inset) * S);
+  return b > a;
+}
+}  // namespace
+
+void Face::drawPanel(const Panel& p, uint8_t ink, uint8_t rimInk) {
+  if (p.w <= 0) return;
+  for (int sy = 0; sy < gfx_.height(); ++sy) {
+    int a, b, ia, ib;
+    if (!boxRow(p.w, p.h, p.r, sy, a, b)) continue;
+    if (p.rim > 0 && boxRow(p.w - 2 * p.rim, p.h - 2 * p.rim, p.r - p.rim, sy, ia, ib)) {
+      gfx_.span(sy, a, ia, rimInk);
+      gfx_.span(sy, ia, ib, ink);
+      gfx_.span(sy, ib, b, rimInk);
+    } else {
+      gfx_.span(sy, a, b, p.rim > 0 ? rimInk : ink);
+    }
+  }
+}
+
+// The plate's rows above and below the band, straight onto the screen: it doesn't move, so only when the pack
+// changes or something else has drawn there.
+void Face::drawBackdrop() {
+  backdropDirty_ = false;
+  const Panel& p = pack_.plate;
+  uint32_t bg = gfx_.background();
+  int top = -gfx_.bandY(), bottom = M5.Display.height() - gfx_.bandY();
+  for (int sy = top; sy < bottom; ++sy) {
+    if (sy == 0) sy = gfx_.height();  // the band draws its own
+    if (sy >= bottom) break;
+    int w = gfx_.width(), a, b, ia, ib;
+    if (!boxRow(p.w, p.h, p.r, sy, a, b)) {
+      gfx_.screenSpan(sy, 0, w, bg);
+      continue;
+    }
+    gfx_.screenSpan(sy, 0, a, bg);
+    gfx_.screenSpan(sy, b, w, bg);
+    if (p.rim > 0 && boxRow(p.w - 2 * p.rim, p.h - 2 * p.rim, p.r - p.rim, sy, ia, ib)) {
+      gfx_.screenSpan(sy, a, ia, p.rimColor);
+      gfx_.screenSpan(sy, ia, ib, p.color);
+      gfx_.screenSpan(sy, ib, b, p.rimColor);
+    } else {
+      gfx_.screenSpan(sy, a, b, p.rim > 0 ? p.rimColor : p.color);
+    }
+  }
+}
+
 void Face::render() {
   gfx_.clear();
+  if (backdropDirty_) drawBackdrop();
+  drawPanel(pack_.plate, FaceGfx::PLATE, FaceGfx::RIM);
+  drawPanel(pack_.socket, FaceGfx::SOCKET, FaceGfx::SOCKET);
   const EmotionLook& look = pack_.looks[static_cast<int>(shown())];
   bool lively = !still_ && !sleepLook();
 
@@ -747,6 +834,15 @@ void Face::render() {
   float leftOuter, rightOuter;
   if (pack_.cyclops) {
     float cx = SCREEN_W / 2 + gx;
+    if (pack_.socket.w > 0) {  // glances stay inside the socket: the lens (or the eye) never leaves it
+      float rl = fmaxf(curL_.w, curL_.h) * 0.5f + pack_.lens;
+      float roomX = fmaxf(0, pack_.socket.w * 0.5f - rl), roomY = fmaxf(0, pack_.socket.h * 0.5f - rl);
+      cx = constrain(cx - curL_.dx, SCREEN_W / 2 - roomX, SCREEN_W / 2 + roomX) + curL_.dx;
+      cy = constrain(cy + curL_.dy, SCREEN_H / 2 - roomY, SCREEN_H / 2 + roomY) - curL_.dy;
+    }
+    if (pack_.lens > 0)  // the lens the eye shines through, round whatever the eye's shape
+      gfx_.fillCircle((cx - curL_.dx) * S, (cy + curL_.dy) * S, (fmaxf(curL_.w, curL_.h) * 0.5f + pack_.lens) * S,
+                      FaceGfx::LENS);
     drawEye(curL_, cx, cy, 1, hScale);
     leftOuter = cx - curL_.dx - curL_.w / 2;
     rightOuter = cx - curL_.dx + curL_.w / 2;

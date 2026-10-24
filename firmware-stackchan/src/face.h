@@ -70,6 +70,14 @@ struct EmotionLook {
   int32_t color = -1;       // RGB888 of the eyes; -1 = the pack's colour
 };
 
+// A flat shape behind the eyes, centred on the screen, in face pixels: a face plate (it may be taller than the
+// face's band, up to the whole screen: 96), or the socket the eye sits in. w 0 = none.
+struct Panel {
+  float w = 0, h = 0, r = 0;
+  float rim = 0;               // a darker edge this thick
+  uint32_t color = 0, rimColor = 0;
+};
+
 struct FacePack {
   char name[32] = "Rocky";
   float gap = 16;           // between the eyes
@@ -81,6 +89,10 @@ struct FacePack {
   uint32_t color = 0xF4F1EA;  // the eyes' colour for emotions that don't set one
   EmotionLook looks[static_cast<int>(Emotion::COUNT)];
   EyeShape asleep;          // the shut eyes while sleeping
+  Panel plate, socket;      // a face behind the eyes (GLaDOS's long white one) and the socket the eye sits in
+  float lens = 0;           // a ring this much wider than the eye around it, that moves with it (0 = none)
+  uint32_t lensColor = 0;
+  int32_t pupil = -1;       // the pupils' colour (RGB888); -1 = the usual dark
 };
 
 class Face {
@@ -114,6 +126,8 @@ class Face {
 
   // Call every frame: advances animation, then renders.
   void update(uint32_t nowMs);
+  // Something else drew over the screen: the next frame repaints the plate above and below the band too.
+  void redrawBackdrop() { backdropDirty_ = true; }
 
  private:
   struct Zed {
@@ -135,6 +149,8 @@ class Face {
   void drawMouth(int cx, int cy, int eyeBottom);
   void drawFlourishes(float leftOuter, float rightOuter, int eyeTop, int eyeBottom);
   void drawZeds();
+  void drawPanel(const Panel& p, uint8_t ink, uint8_t rimInk);
+  void drawBackdrop();
   // Drawing in face pixels: blocks for the pixel-art bits, smooth shapes at
   // the LCD's resolution for the rest.
   void dot(int x, int y, uint8_t ink);
@@ -198,6 +214,7 @@ class Face {
   float smile_ = 0.0f;          // eased resting-mouth curve
 
   bool idle_ = true;
+  bool backdropDirty_ = true;
   uint32_t lastFrameMs_ = 0;
   uint32_t frame_ = 0;
 };
