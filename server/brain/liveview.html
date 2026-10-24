@@ -161,6 +161,27 @@
              transition: translate .35s cubic-bezier(.3,1.3,.5,1), width .35s cubic-bezier(.3,1.3,.5,1); }
   @media (max-width: 640px) { .tabs [role=tab] { padding: 9px 13px; letter-spacing: .16em; } }
 
+  /* ── settings ───────────────────────────────────────────────────────── */
+  .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; align-items: start; }
+  .settings .card + .card { margin-top: 0; }
+  .srow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; padding: 9px 0; border-top: 1px dashed var(--line); }
+  .srow:first-of-type { border-top: 0; }
+  .srow .name b { font-weight: 500; }
+  .srow .name small { display: block; color: var(--muted); font-size: 12px; }
+  .srow .ctl { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+  .srow input[type=text] { min-width: 0; width: 210px; flex: none; }
+  .srow input[type=number], .srow input[type=time], .srow select { font: 14px var(--body); color: var(--ink); background: #090c13;
+    border: 1px solid var(--line-strong); border-radius: 4px; padding: 6px 8px; }
+  .srow input[type=number] { width: 80px; }
+  .srow input[type=range] { width: 150px; }
+  .srow .v { font: 13px var(--mono); color: var(--amber); min-width: 44px; text-align: right; }
+  .srow .reset { padding: 2px 7px; font-size: 12px; }
+  .srow.wide { grid-template-columns: 1fr; }   /* a box and a button: the control gets its own line */
+  .srow.wide .ctl { justify-content: flex-start; }
+  .srow .reset[hidden] { display: none; }
+  .srow input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--amber); }
+  @media (max-width: 560px) { .srow { grid-template-columns: 1fr; } .srow .ctl { justify-content: flex-start; flex-wrap: wrap; } }
+
   /* ── log (from cgro00's V2 dashboard) ──────────────────────────────── */
   .log { position: relative; height: min(62vh, 640px); overflow: auto; margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 4px;
          background: repeating-linear-gradient(0deg, rgba(255,255,255,.015) 0 1px, transparent 1px 3px), #05070b;
@@ -230,6 +251,7 @@
     <button type="button" role="tab" id="t-live" aria-controls="p-live" aria-selected="true">Live</button>
     <button type="button" role="tab" id="t-chars" aria-controls="p-chars" aria-selected="false" tabindex="-1">Personalities</button>
     <button type="button" role="tab" id="t-mem" aria-controls="p-mem" aria-selected="false" tabindex="-1">Memories</button>
+    <button type="button" role="tab" id="t-settings" aria-controls="p-settings" aria-selected="false" tabindex="-1">Settings</button>
     <button type="button" role="tab" id="t-log" aria-controls="p-log" aria-selected="false" tabindex="-1">Log</button>
   </nav>
 
@@ -276,8 +298,6 @@
           <button type="button" data-act="ask">Ask <span data-pron="1">him</span></button>
         </form>
         <p class="hint">Say it speaks the words as written. Ask <span data-pron="1">him</span> sends them to <span data-pron="2">his</span> brain.</p>
-        <div class="tune-grid" id="voicetunes" style="margin-top:12px"></div>
-        <p class="hint">Speaker tuning · applies from the next reply · keep it in server/brain/config.py</p>
       </div>
       <div class="card">
         <h2 class="label"><span>Rest</span><span class="sub" id="awakenote"></span></h2>
@@ -288,10 +308,6 @@
       </div>
     </aside>
 
-    <section class="card tuning" aria-labelledby="l-tune">
-      <h2 class="label" id="l-tune"><span>Listening</span><span class="sub">changes apply now and last until the server restarts · keep one by setting it in server/brain/config.py</span></h2>
-      <div class="tune-grid" id="tunes"></div>
-    </section>
   </main>
 
   <div role="tabpanel" id="p-chars" aria-labelledby="t-chars" hidden>
@@ -379,6 +395,22 @@
       </form>
       <p class="hint">Kept for good in server/data/memories.json and given to <span data-pron="1">him</span> in every conversation. You can also ask <span data-pron="1">him</span> to remember or forget things.</p>
     </section>
+  </div>
+
+  <div role="tabpanel" id="p-settings" aria-labelledby="t-settings" hidden>
+    <div class="settings" id="settingsbox"></div>
+    <div class="settings" style="margin-top:18px">
+      <section class="card" aria-labelledby="l-tune">
+        <h2 class="label" id="l-tune"><span>Listening</span><span class="sub">applies now · kept</span></h2>
+        <div class="tune-grid" id="tunes"></div>
+      </section>
+      <section class="card" aria-labelledby="l-spk">
+        <h2 class="label" id="l-spk"><span>Speaker</span><span class="sub">from the next reply · kept</span></h2>
+        <div class="tune-grid" id="voicetunes"></div>
+      </section>
+    </div>
+    <p class="hint">Kept in server/data/settings.json, over config.py and server/.env; ↺ puts one back to the default.
+      The robot keeps its clock and screen settings itself, so they hold while the brain is away.</p>
   </div>
 
   <div role="tabpanel" id="p-log" aria-labelledby="t-log" hidden>
@@ -589,6 +621,7 @@
     }
     if (focus) tab.focus();
     placeTabGlow();
+    if (tab.id === "t-settings" && typeof loadSettings === "function") loadSettings();
     if (tab.id === "t-log") requestAnimationFrame(() => { const l = $("log"); l.scrollTop = l.scrollHeight; });  // the newest lines
     try { localStorage.setItem("rocky-tab", tab.id); } catch {}
   }
@@ -611,9 +644,134 @@
   {
     let saved = null;
     try { saved = localStorage.getItem("rocky-tab"); } catch {}
-    const first = { "#personalities": "t-chars", "#memories": "t-mem", "#log": "t-log", "#live": "t-live" }[location.hash] || saved;
+    const first = { "#personalities": "t-chars", "#memories": "t-mem", "#settings": "t-settings", "#log": "t-log",
+                    "#live": "t-live" }[location.hash] || saved;
     selectTab($(first) || tabs[0]);
   }
+
+  // ── settings (from cgro00's V2 dashboard; brain/settings.py) ──────────
+  // [section, key, label, help, control]. Controls: check, text, number, range:min:max, select:value=label,...,
+  // time, facepack, zone, place.
+  const SETTINGS_UI = [
+    ["The robot", "", [
+      ["robot", "human_name", "Your name", "what every character calls you; empty = HUMAN_NAME in server/.env", "text"],
+      ["robot", "body_language", "Body language", "small head moves while it talks and waits", "check"],
+      ["robot", "face_pack", "Face pack", "for characters that don't pick their own", "facepack"],
+    ]],
+    ["Clock screen", "while it sleeps on USB", [
+      ["clock", "h24", "24-hour clock", "", "check"],
+      ["clock", "timezone", "Time zone", "", "zone"],
+      ["clock", "show_weather", "Show the weather", "", "check"],
+      ["clock", "weather_minutes", "Weather every", "minutes", "number"],
+    ]],
+    ["Weather", "", [
+      ["weather", "location", "Home", "for the clock and \u201cwhat's the weather?\u201d", "place"],
+      ["weather", "units", "Units", "", "select:fahrenheit=\u00b0F,celsius=\u00b0C"],
+    ]],
+    ["Screen", "firmware 0.6.5+", [
+      ["screen", "idle_screen", "While it sleeps", "on USB, by day; at night the clock",
+       "select:clock=the clock,pong=Pong,tetris=Tetris,frogger=Frogger,life=Game of Life,roam=Roam (asleep, looking round the room)"],
+      ["screen", "brightness", "Brightness", "awake; 0 = the display's own", "range:0:100"],
+      ["screen", "clock_brightness", "Clock brightness", "0 = as bright as awake", "range:0:100"],
+      ["screen", "night_mode", "At night the clock", "", "select:off=stays bright,dim=dims,dark=goes dark"],
+      ["screen", "night_start", "Night from", "", "time"],
+      ["screen", "night_end", "Until", "", "time"],
+      ["screen", "night_brightness", "Night brightness", "when it dims", "range:1:100"],
+    ]],
+  ];
+  let settingsMeta = null;
+  const setCtl = {};   // "section.key" -> {get, set, reset}
+  async function saveSetting(sec, key, value) {
+    try {
+      const j = await api("setting", { section: sec, key, value });
+      toast(value === null ? "Back to the default" : j.place ? "Home: " + j.place : "Saved");
+      await loadSettings();
+    } catch (e) { toast(e.message, true); await loadSettings(); }
+  }
+  function buildSettings() {
+    const box = $("settingsbox");
+    for (const [title, sub, rows] of SETTINGS_UI) {
+      const card = document.createElement("section"); card.className = "card";
+      card.innerHTML = `<h2 class="label"><span>${title}</span><span class="sub">${sub}</span></h2>`;
+      for (const [sec, key, label, help, kind] of rows) {
+        const row = document.createElement("div"); row.className = "srow";
+        row.innerHTML = `<div class="name"><b>${label}</b><small>${help}</small></div><div class="ctl"></div>`;
+        const ctl = row.querySelector(".ctl"), small = row.querySelector("small");
+        let el, get, set, out;
+        const [type, ...arg] = kind.split(":");
+        if (type === "check") {
+          el = document.createElement("input"); el.type = "checkbox";
+          get = () => el.checked; set = v => { el.checked = !!v; };
+        } else if (type === "range") {
+          el = document.createElement("input"); el.type = "range"; el.min = arg[0]; el.max = arg[1]; el.step = 1;
+          out = document.createElement("span"); out.className = "v";
+          el.addEventListener("input", () => { out.textContent = el.value + "%"; });
+          get = () => +el.value; set = v => { el.value = v; out.textContent = v + "%"; };
+        } else if (type === "select" || type === "facepack") {
+          el = document.createElement("select");
+          const opts = type === "select" ? arg.join(":").split(",").map(o => o.split("=")) : [];
+          for (const [v, t] of opts) { const o = document.createElement("option"); o.value = v; o.textContent = t; el.appendChild(o); }
+          get = () => el.value;
+          set = v => {
+            if (type === "facepack") {
+              const packs = settingsMeta.face_packs, key = packs.join();
+              if (el.dataset.packs !== key) {
+                el.dataset.packs = key; el.replaceChildren();
+                for (const p of packs) { const o = document.createElement("option"); o.value = o.textContent = p; el.appendChild(o); }
+              }
+            }
+            el.value = v;
+          };
+        } else if (type === "number") {
+          el = document.createElement("input"); el.type = "number";
+          get = () => +el.value; set = v => { el.value = v; };
+        } else if (type === "time") {
+          el = document.createElement("input"); el.type = "time";
+          get = () => el.value; set = v => { el.value = v; };
+        } else {   // text, zone, place: saved when you leave the box or press Enter
+          el = document.createElement("input"); el.type = "text"; el.autocomplete = "off"; el.spellcheck = false;
+          el.maxLength = type === "text" ? 40 : 80;
+          get = () => el.value.trim(); set = v => { if (document.activeElement !== el) el.value = v ?? ""; };
+          el.addEventListener("keydown", ev => { if (ev.key === "Enter") el.blur(); });
+          if (type === "zone") {
+            row.classList.add("wide");
+            const b = document.createElement("button"); b.type = "button"; b.textContent = "Use this computer's";
+            b.onclick = () => saveSetting(sec, key, Intl.DateTimeFormat().resolvedOptions().timeZone);
+            ctl.append(el, b);
+          }
+          if (type === "place") el.placeholder = "Alviso, CA";
+        }
+        if (!ctl.contains(el)) ctl.appendChild(el);
+        if (out) ctl.appendChild(out);
+        const reset = document.createElement("button"); reset.type = "button"; reset.className = "reset"; reset.textContent = "\u21ba";
+        reset.title = "back to the default"; reset.onclick = () => saveSetting(sec, key, null);
+        ctl.appendChild(reset);
+        el.addEventListener("change", () => {
+          const v = get();
+          if (type === "zone" && v === "") return saveSetting(sec, key, null);
+          saveSetting(sec, key, v);
+        });
+        setCtl[sec + "." + key] = { set, reset, small, help, type };
+        card.appendChild(row);
+      }
+      box.appendChild(card);
+    }
+  }
+  async function loadSettings() {
+    try {
+      settingsMeta = await api("settings");
+      for (const [id, c] of Object.entries(setCtl)) {
+        const [sec, key] = id.split("."), s = settingsMeta.settings[sec][key];
+        c.set(s.value); c.reset.hidden = !s.changed;
+        if (c.type === "zone") c.small.textContent = "empty = the brain's (" + (settingsMeta.zone || "UTC") + ")";
+        if (id === "robot.human_name") c.small.textContent = c.help + (s.default ? " (" + s.default + ")" : "");
+      }
+      const fw = settingsMeta.robot_fw;
+      document.querySelector("#settingsbox .card:nth-child(4) .sub").textContent =
+        "firmware 0.6.5+" + (fw ? " · the robot has " + fw : " · no robot connected");
+    } catch (e) { toast(e.message, true); }
+  }
+  buildSettings();
 
   // ── log ────────────────────────────────────────────────────────────────
   let logSeq = 0, stick = true;

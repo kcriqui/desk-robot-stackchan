@@ -70,6 +70,15 @@ settle. The server takes either type.
 {"type": "weather", "temp": 65, "hi": 67, "lo": 54, "code": 2, "day": true, "unit": "F", "sky": "partly cloudy"}
                                   // 0.6.0+: the weather at home for the clock screen (WMO code), on connect
                                   // and every 30 min; the screen drops it after 3 h without an update.
+{"type": "weather", "none": true}  // 0.6.3+: no weather on the clock screen (switched off in Settings)
+{"type": "screen", "face": 0, "clock": 0, "night": 1, "n0": 1380, "n1": 420, "night_pct": 10}
+                                  // firmware-stackchan 0.6.3+: brightness in percent, awake (0 = the
+                                  // display's default) and on the clock (0 = as awake); at night (minutes
+                                  // after midnight, n0 to n1, may span midnight) the clock dims to night_pct
+                                  // (night 1) or goes dark (2); 0 = off. Kept in flash. Sent on connect.
+                                  // 0.6.4+ also "idle": what it shows while it sleeps on USB by day: 0 the
+                                  // clock, 1 Pong, 2 Tetris, 3 Frogger, 4 roam (the sleeping face, the head looking around),
+                                  // 5 Conway's Game of Life (0.6.5+).
                                   // Asleep for 5 s (not in deep sleep), the robot shows the clock screen.
 {"type": "power_off", "why": "idle"}  // firmware-stackchan 0.5.0+: power off ("idle" or "battery"); the
                                   // server says goodbye first. Only the power button turns it back on.

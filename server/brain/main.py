@@ -44,7 +44,7 @@ import time
 
 import websockets
 
-from . import alerts, battery, clock, config, faces, logbook, mouth, personality, weather, web
+from . import alerts, battery, clock, config, faces, logbook, mouth, personality, settings, weather, web
 from .body import Body
 from .dance import Dancer, length as dance_length
 from .memories import Memories
@@ -234,6 +234,8 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     await send_to_robot({"type": "glance", "on": False})
     asyncio.create_task(send_clock())  # the clock screen's time zone and weather (fetched: don't hold up the link)
     await send_face_pack()
+    await send_screen()
+    await send_to_robot({"type": "volume", "level": speaker_volume})  # the Settings tab's (kept)
     try:
         async for message in websocket:
             if websocket is robot_socket:
@@ -1025,7 +1027,8 @@ def check_tts(text: str, pcm: bytes) -> None:
 
 async def set_volume(level: float) -> None:
     global speaker_volume
-    speaker_volume = max(0.0, min(1.0, level))
+    speaker_volume = round(max(0.0, min(1.0, level)), 2)
+    settings.change("robot", "volume", speaker_volume)  # kept across restarts
     await send_to_robot({"type": "volume", "level": speaker_volume})
 
 
@@ -1164,18 +1167,23 @@ async def _console_command(action: str, payload: dict) -> dict:
         if key not in TUNABLE:
             raise ValueError(f"tunable: {', '.join(TUNABLE)}")
         value = _number(payload, "value", *TUNABLE[key])
-        setattr(config, key, value)
+        settings.change(*_TUNE_SETTING[key], value)
         if ears is not None:
             ears.apply_config()
-        print(f"console: {key} = {value:g} (until restart; set it in config.py to keep)")
+        print(f"console: {key} = {value:g} (kept in server/data/settings.json)")
     elif action == "voice":
         # Speaker tuning; takes effect on the next reply.
         key = payload.get("key")
         if key not in VOICE_TUNABLE:
             raise ValueError(f"voice settings: {', '.join(VOICE_TUNABLE)}")
         value = _number(payload, "value", *VOICE_TUNABLE[key])
-        setattr(config, key, value)
-        print(f"console: {key} = {value:g} (until restart; set it in config.py to keep)")
+        settings.change("speaker", key, value)
+        print(f"console: {key} = {value:g} (kept in server/data/settings.json)")
+    elif action == "settings":  # the Settings tab: every setting, its default, and whether it was changed
+        return {"settings": settings.current(speaker_volume), "face_packs": [p["id"] for p in face_packs()],
+                "zone": clock._zone_name(), "robot_fw": ".".join(map(str, robot_fw)) if robot_socket else None}
+    elif action == "setting":
+        return await change_setting(str(payload.get("section", "")), str(payload.get("key", "")), payload.get("value"))
     elif action == "console":  # the Log tab's command box: a line for the console, as if typed at it
         line = str(payload.get("line", "")).strip()
         if not line or len(line) > 300:
@@ -1477,6 +1485,7 @@ async def use_character(char_id: str) -> str:
     face_pack = personality.face_pack()
     await send_face_pack()
     print(f"character: {c.name} (voice {personality.voice()[0]}, face {face_pack})")
+    settings.change("robot", "character", c.id)  # a restart keeps them
     if mouth.engine() == "piper":
         # Load (the first time, download) the new voice now, not on the first reply.
         asyncio.get_running_loop().run_in_executor(None, _warm_voice)
@@ -1488,6 +1497,59 @@ def _warm_voice() -> None:
         mouth._synthesize_piper("Ready.")
     except Exception as e:  # it will say so again when it speaks
         print(f"(voice didn't load: {e})")
+
+
+_TUNE_SETTING = {"VAD_THRESHOLD": ("listening", "VAD_THRESHOLD"), "TURN_THRESHOLD": ("listening", "TURN_THRESHOLD"),
+                 "TURN_MAX_SILENCE": ("listening", "TURN_MAX_SILENCE"), "AWAKE_SECONDS": ("robot", "awake_seconds")}
+
+
+async def change_setting(section: str, key: str, value) -> dict:
+    """The Settings tab changed one (value None = back to the default): check it, keep it, and apply it now."""
+    global face_pack
+    if (section, key) == ("robot", "character"):
+        await use_character(str(value or "rocky"))  # it keeps the setting itself
+        return {"value": personality.CHARACTER.id}
+    if (section, key) == ("robot", "volume"):
+        await set_volume(float(settings.DEFAULTS["robot"]["volume"] if value is None else value))
+        return {"value": speaker_volume}
+    if (section, key) == ("robot", "face_pack") and value is not None and value not in [p["id"] for p in face_packs()]:
+        raise ValueError("no such face pack")
+    place = None
+    if (section, key) == ("weather", "location") and value:
+        place = await asyncio.get_running_loop().run_in_executor(None, weather.find_place, str(value))
+        if place is None:
+            raise ValueError(f"no place called {value!r} found")
+    if (section, key) == ("clock", "timezone") and value and clock.is_zone_name(str(value).strip()):
+        import zoneinfo
+        try:
+            zoneinfo.ZoneInfo(str(value).strip())
+        except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+            raise ValueError(f"no time zone called {value!r} (like America/Los_Angeles)") from None
+    value = settings.change(section, key, value)
+    print(f"settings: {section}.{key} = {value!r}")
+    if section == "robot" and key == "human_name":
+        personality.refresh()
+    elif section == "robot" and key == "face_pack" and not personality.CHARACTER.face:
+        face_pack = personality.face_pack()
+        await send_face_pack()
+    elif section == "clock" or section == "weather":
+        asyncio.create_task(send_clock())  # the time zone and style, then the weather (fetched)
+    elif section == "screen":
+        await send_screen()
+    elif section == "listening" and ears is not None:
+        ears.apply_config()
+    return {"value": value, **({"place": str(place)} if place else {})}
+
+
+async def send_screen() -> None:
+    """Screen brightness and the clock at night (StackChan firmware 0.6.3+; it keeps them in flash)."""
+    if robot_fw < (0, 6, 3):
+        return
+    await send_to_robot({"type": "screen", "face": config.SCREEN_BRIGHTNESS, "clock": config.CLOCK_BRIGHTNESS,
+                         "night": ("off", "dim", "dark").index(config.NIGHT_MODE),
+                         "n0": settings.minutes(config.NIGHT_START), "n1": settings.minutes(config.NIGHT_END),
+                         "night_pct": config.NIGHT_BRIGHTNESS,
+                         "idle": ("clock", "pong", "tetris", "frogger", "roam", "life").index(config.IDLE_SCREEN)})
 
 
 async def send_face_pack() -> None:
@@ -1502,6 +1564,10 @@ async def send_face_pack() -> None:
 async def send_weather() -> None:
     """The weather at home for the clock screen. Nothing without HOME_LOCATION or when the service is down."""
     if robot_socket is None or robot_fw < (0, 6, 0):
+        return
+    if not config.CLOCK_WEATHER:
+        if robot_fw >= (0, 6, 3):
+            await send_to_robot({"type": "weather", "none": True})  # just the time
         return
     try:
         msg = await asyncio.get_running_loop().run_in_executor(None, clock.weather_message)
@@ -1685,7 +1751,18 @@ async def console_loop() -> None:
 
 
 async def main() -> None:
+    global speaker_volume, face_pack
     logbook.install()  # the live view's Log tab
+    saved = settings.apply_saved()  # the Settings tab's, over config.py and server/.env
+    speaker_volume = saved.get("robot", {}).get("volume", speaker_volume)
+    if config.CHARACTER != personality.CHARACTER.id:
+        try:
+            personality.use(config.CHARACTER)  # who it was when the brain stopped
+        except ValueError as e:
+            print(f"(character {config.CHARACTER!r}: {e}; staying {personality.CHARACTER.name})")
+    else:
+        personality.refresh()  # your name may be a setting
+    face_pack = personality.face_pack()
     print(f"{config.ROBOT_NAME} brain server — model {config.MODEL}")
     print(f"listening for the robot on ws://0.0.0.0:{config.PORT}")
     eyes.state_provider = console_state

@@ -128,6 +128,8 @@ class Face {
   void update(uint32_t nowMs);
   // Something else drew over the screen: the next frame repaints the plate above and below the band too.
   void redrawBackdrop() { backdropDirty_ = true; }
+  // An idle game borrowed the canvas's inks: put the face's back (its pack's included).
+  void restoreInks();
 
  private:
   struct Zed {

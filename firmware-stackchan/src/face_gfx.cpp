@@ -10,6 +10,11 @@ void FaceGfx::begin() {
   canvas_.setColorDepth(4);
   canvas_.createSprite(lroundf(FACE_W * SCALE), lroundf(FACE_H * SCALE));
   canvas_.createPalette();
+  resetInks();
+  bandY_ = (M5.Display.height() - canvas_.height()) / 2;
+}
+
+void FaceGfx::resetInks() {
   setInk(BG, bg_);
   setInk(EYE, 0xFFFFFF);
   setInk(PUPIL, 0x0A0C12);
@@ -18,7 +23,18 @@ void FaceGfx::begin() {
   setInk(TEAR, 0x7AC8FF);
   setInk(HEART, 0xFF4A6A);
   setInk(STEAM, 0xFF8A3A);
-  bandY_ = (M5.Display.height() - canvas_.height()) / 2;
+}
+
+void FaceGfx::text(const char* s, int x, int y, const lgfx::IFont* font, uint8_t ink, uint8_t datum) {
+  canvas_.setFont(font);
+  canvas_.setTextColor(ink);
+  canvas_.setTextDatum(datum);
+  canvas_.drawString(s, x, y);
+}
+
+int FaceGfx::textWidth(const char* s, const lgfx::IFont* font) {
+  canvas_.setFont(font);
+  return canvas_.textWidth(s);
 }
 
 void FaceGfx::screenSpan(int y, int x0, int x1, uint32_t rgb) {

@@ -439,6 +439,20 @@ TEMP_UNIT = "celsius" if os.environ.get("TEMP_UNIT", "").lower().startswith("c")
 CLOCK_TZ = os.environ.get("CLOCK_TZ", "").strip()
 CLOCK_24H = os.environ.get("CLOCK_24H", "") == "1"
 CLOCK_WEATHER_MINUTES = 30
+CLOCK_WEATHER = True       # the weather on the clock screen
+# The robot's screen (StackChan firmware 0.6.3+), percent: awake (0 = the display's own default), the clock
+# (0 = as bright as awake), and at night the clock dims to NIGHT_BRIGHTNESS or goes dark. The live view's Settings
+# tab changes all of these (brain/settings.py).
+SCREEN_BRIGHTNESS = 0
+CLOCK_BRIGHTNESS = 0
+NIGHT_MODE = "off"         # off | dim | dark
+NIGHT_START = "23:00"
+NIGHT_END = "07:00"
+NIGHT_BRIGHTNESS = 10
+# What the screen shows while it sleeps on USB (firmware 0.6.4+): the clock, a game that plays itself (Pong,
+# Tetris, Frogger, from V2; Conway's Game of Life), or roam (the sleeping face, the head looking round the room).
+# At night: the clock.
+IDLE_SCREEN = "clock"
 
 # Facts he keeps for good (the remember / forget tools; memories.py). The
 # server/data folder is git-ignored.

@@ -5,6 +5,7 @@
 
 #include <Arduino.h>
 #include <M5StackChan.h>
+#include <Preferences.h>
 #include <M5Unified.h>
 #include <WiFi.h>
 
@@ -13,6 +14,7 @@
 #include "config.h"
 #include "face.h"
 #include "face_gfx.h"
+#include "idle_games.h"
 #include "link.h"
 #include "mic.h"
 #include "wake.h"
@@ -47,7 +49,16 @@ Mic mic;
 Wake wake;
 Camera camera;
 ClockScreen clockScreen;
-bool clockShown = false;  // the clock screen is up instead of the face
+// What the screen shows while it sleeps (on USB: on battery deep sleep turns it off): after a few seconds of the
+// sleeping face, the clock, an idle game, or Roam (still the sleeping face, the head looking round the room). At
+// night always
+// the clock (its night dimming). The brain picks one (Settings, the `screen` message).
+enum class Shown : uint8_t { Face, Clock, Game, Roam };
+Shown shown = Shown::Face;
+IdleMode idleMode = IdleMode::Clock;
+uint32_t nextGameMs = 0;
+constexpr uint32_t GAME_FRAME_MS = 66;  // ~15 frames a second, as on V2
+uint32_t nextStatusMs = 0;
 uint32_t nextTempMs = 0;
 volatile bool speakDonePending = false;  // set by the speaker task, sent from loop()
 
@@ -116,6 +127,134 @@ void applyMic() {
 }
 uint8_t awakeBrightness = 0;
 
+// Screen brightness and the clock screen at night: the brain's `screen` message (its Settings tab), kept in flash so
+// they hold with the brain away. Percents; face 0 = the display's own default, clock 0 = as bright as awake.
+struct ScreenSettings {
+  uint8_t face = 0, clock = 0;
+  uint8_t night = 0;          // 0 off, 1 dim, 2 dark (the screen off)
+  uint8_t nightPct = 10;
+  uint16_t n0 = 23 * 60, n1 = 7 * 60;  // night from n0 to n1, minutes after midnight (it may span midnight)
+  uint8_t idle = 0;           // IdleMode: 0 clock, 1 pong, 2 tetris, 3 frogger, 4 roam, 5 life
+} screenCfg;
+uint8_t defaultBrightness = 0;   // the display's own, at boot
+uint8_t shownClockBrightness = 255;  // what the clock screen was last given
+uint32_t nextClockBrightMs = 0;
+
+uint8_t fromPct(uint8_t p) { return static_cast<uint8_t>(lroundf(constrain(p, 0, 100) * 2.55f)); }
+
+// The clock screen's brightness now: night's if it's night, else the clock's own, else as bright as awake (but
+// readable: at least 96).
+bool isNight() {
+  if (!screenCfg.night || !clockScreen.timeKnown()) return false;
+  time_t t = time(nullptr);
+  tm local;
+  localtime_r(&t, &local);
+  int m = local.tm_hour * 60 + local.tm_min;
+  return screenCfg.n0 <= screenCfg.n1 ? (m >= screenCfg.n0 && m < screenCfg.n1) : (m >= screenCfg.n0 || m < screenCfg.n1);
+}
+
+uint8_t clockBrightness() {
+  if (isNight()) return screenCfg.night == 2 ? 0 : max(fromPct(screenCfg.nightPct), (uint8_t)1);
+  return screenCfg.clock ? fromPct(screenCfg.clock) : max(awakeBrightness, (uint8_t)96);
+}
+
+void loadScreen() {
+  Preferences p;
+  if (!p.begin("screen", true)) return;
+  screenCfg.face = p.getUChar("face", screenCfg.face);
+  screenCfg.clock = p.getUChar("clock", screenCfg.clock);
+  screenCfg.night = p.getUChar("night", screenCfg.night);
+  screenCfg.nightPct = p.getUChar("nightPct", screenCfg.nightPct);
+  screenCfg.n0 = p.getUShort("n0", screenCfg.n0);
+  screenCfg.n1 = p.getUShort("n1", screenCfg.n1);
+  screenCfg.idle = p.getUChar("idle", screenCfg.idle);
+  p.end();
+}
+
+void saveScreen() {
+  Preferences p;
+  if (!p.begin("screen", false)) return;
+  p.putUChar("face", screenCfg.face);
+  p.putUChar("clock", screenCfg.clock);
+  p.putUChar("night", screenCfg.night);
+  p.putUChar("nightPct", screenCfg.nightPct);
+  p.putUShort("n0", screenCfg.n0);
+  p.putUShort("n1", screenCfg.n1);
+  p.putUChar("idle", screenCfg.idle);
+  p.end();
+}
+
+IdleGames games(gfx);
+extern float batteryVolts, batteryMa;  // (below) the body's INA226
+
+// The charge from the resting voltage (the brain's battery.py curve, for one Li-ion cell).
+int batteryPercent(float v) {
+  static const float V[] = {3.30f, 3.50f, 3.61f, 3.69f, 3.74f, 3.77f, 3.80f, 3.84f, 3.90f, 3.96f, 4.05f, 4.15f};
+  static const int P[] = {0, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
+  if (v <= V[0]) return 0;
+  for (int i = 1; i < 12; ++i)
+    if (v <= V[i]) return lroundf(P[i - 1] + (P[i] - P[i - 1]) * (v - V[i - 1]) / (V[i] - V[i - 1]));
+  return 100;
+}
+
+// The WiFi and battery for the clock screen's corners.
+void updateStatus() {
+  int8_t bars = -1;
+  if (WiFi.status() == WL_CONNECTED) {
+    int r = WiFi.RSSI();
+    bars = r > -55 ? 4 : r > -65 ? 3 : r > -75 ? 2 : r > -85 ? 1 : 0;
+  }
+  uint8_t power = batteryMa > ON_BATTERY_MA ? 0 : batteryMa < -ON_BATTERY_MA ? 1 : 2;
+  clockScreen.setStatus(bars, batteryVolts > 0 ? batteryPercent(batteryVolts) : -1, batteryVolts > 0 ? power : 255);
+}
+
+// Roam: while it sleeps by day, the head looks round the room every few seconds, slowly, with the sleeping face
+// (dimmed, Z's) still up (from V2's roamUpdate, whose face woke up for it). A glance from where it is, back toward
+// the middle, or anywhere across the room.
+struct {
+  uint32_t at = 0;
+  bool active = false;
+} roam;
+constexpr int ROAM_PAN_SPEED = 260, ROAM_TILT_SPEED = 220;
+
+void roamStart(uint32_t now) {
+  roam.active = true;
+  roam.at = now + 1500;
+  panNeck.setSpeed(ROAM_PAN_SPEED);
+  tiltNeck.setSpeed(ROAM_TILT_SPEED);
+}
+
+void roamStop() {
+  if (!roam.active) return;
+  roam.active = false;
+  panNeck.setSpeed(PAN_SPEED);
+  tiltNeck.setSpeed(TILT_SPEED);
+  panNeck.setTarget(0);
+  tiltNeck.setTarget(TILT_REST_DEG);
+}
+
+void roamUpdate(uint32_t now) {
+  if (!roam.active || static_cast<int32_t>(now - roam.at) < 0) return;
+  float pan0 = panNeck.target();
+  int kind = random(100);
+  float pan = kind < 25 ? pan0 + random(15, 36) * (random(2) ? 1 : -1) : kind < 40 ? random(-10, 11)
+                                                                       : random(-60, 61);
+  pan = constrain(pan, -60.0f, 60.0f);  // round the desk, not behind itself
+  float tilt = constrain(TILT_REST_DEG + random(-15, 16), TILT_MIN_DEG, TILT_REST_DEG + 25.0f);
+  panNeck.setTarget(pan);
+  tiltNeck.setTarget(tilt);
+  roam.at = now + random(4000, 9001);
+}
+
+void printScreen() {
+  static const char* kNight[] = {"off", "dim", "dark"};
+  static const char* kIdle[] = {"clock", "pong", "tetris", "frogger", "roam", "life"};
+  Serial.printf("screen: face %u%% (0 = default), clock %u%% (0 = as awake), night %s %02u:%02u-%02u:%02u at %u%%, "
+                "idle %s\n", screenCfg.face, screenCfg.clock, kNight[min(screenCfg.night, (uint8_t)2)],
+                screenCfg.n0 / 60, screenCfg.n0 % 60, screenCfg.n1 / 60, screenCfg.n1 % 60, screenCfg.nightPct,
+                kIdle[min(screenCfg.idle, (uint8_t)5)]);
+}
+
 // Power on battery (config.h). Asleep on battery for DEEP_SLEEP_AFTER_MS, he
 // sleeps deeper: screen off, WiFi power saving, servo power off. The wake
 // word keeps listening. Powering off is the brain's call (it knows about
@@ -175,10 +314,10 @@ void applyStream() {
 
 void setAsleep(bool on) {
   if (!on) setDeepSleep(false);
+  if (!on) roamStop();
   if (on != face.asleep()) {
     asleepSinceMs = on ? (millis() | 1) : 0;  // never 0 while asleep
     if (on) {
-      awakeBrightness = M5.Display.getBrightness();
       M5.Display.setBrightness(max(awakeBrightness / 4, 8));
     } else {
       M5.Display.setBrightness(awakeBrightness);
@@ -384,6 +523,24 @@ void handleCommand(String line) {
       clockScreen.setClock(sp < 0 ? arg : arg.substring(0, sp), sp >= 0 && arg.substring(sp + 1) == "24");
     }
     clockScreen.printStatus();
+  } else if (cmd == "screen") {
+    // "screen <face %> <clock %> <night 0|1|2> <night start min> <night end min> <night %> [idle 0-5]"
+    int f, c, n, a, b, np, idle = screenCfg.idle;
+    if (sscanf(arg.c_str(), "%d %d %d %d %d %d %d", &f, &c, &n, &a, &b, &np, &idle) >= 6) {
+      screenCfg.idle = constrain(idle, 0, 5);
+      screenCfg.face = constrain(f, 0, 100);
+      screenCfg.clock = constrain(c, 0, 100);
+      screenCfg.night = constrain(n, 0, 2);
+      screenCfg.n0 = constrain(a, 0, 1439);
+      screenCfg.n1 = constrain(b, 0, 1439);
+      screenCfg.nightPct = constrain(np, 1, 100);
+      saveScreen();
+      awakeBrightness = screenCfg.face ? fromPct(screenCfg.face) : defaultBrightness;
+      if (!deepSleep && !face.asleep()) M5.Display.setBrightness(awakeBrightness);
+      shownClockBrightness = 255;  // the clock screen picks up the change on its next check
+      nextClockBrightMs = 0;
+    }
+    printScreen();
   } else if (cmd == "weather") {
     if (!clockScreen.setWeather(arg)) Serial.println(F("usage: weather <temp> <hi> <lo> <code> <day 0|1> <F|C> <words>"));
   } else if (cmd == "poweroff") {
@@ -482,6 +639,10 @@ void setup() {
 
   gfx.configure(BACKGROUND_COLOR);
   face.begin();
+  defaultBrightness = M5.Display.getBrightness();
+  loadScreen();
+  awakeBrightness = screenCfg.face ? fromPct(screenCfg.face) : defaultBrightness;
+  M5.Display.setBrightness(awakeBrightness);
   panNeck.begin(ServoNeck::Axis::Pan, PAN_MIN_DEG, PAN_MAX_DEG, PAN_SPEED,
                 PAN_GLANCE_DEG, PAN_INVERT);
   tiltNeck.begin(ServoNeck::Axis::Tilt, TILT_MIN_DEG, TILT_MAX_DEG, TILT_SPEED,
@@ -513,7 +674,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.2 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.6 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -652,26 +813,61 @@ void loop() {
     lastFrameMs = now;
     face.setTalking(speaker.speaking(), speaker.level());
     uint32_t tf = micros();
-    // Asleep for a moment (not in deep sleep, where the screen is off): the
-    // clock screen instead of the face. Waking clears it for the face.
-    bool clock = CLOCK_SCREEN && face.asleep() && !deepSleep && asleepSinceMs &&
-                 msSince(now, asleepSinceMs) >= SLEEP_FACE_MS;
-    if (clock != clockShown) {
-      clockShown = clock;
-      if (clock) {
+    // Asleep for a moment (not in deep sleep, where the screen is off): the idle screen instead of the sleeping
+    // face. Waking puts the face back.
+    bool idle = CLOCK_SCREEN && face.asleep() && !deepSleep && asleepSinceMs &&
+                msSince(now, asleepSinceMs) >= SLEEP_FACE_MS;
+    IdleMode mode = static_cast<IdleMode>(min(screenCfg.idle, (uint8_t)5));
+    Shown want = !idle ? Shown::Face
+                 : (isNight() || mode == IdleMode::Clock) ? Shown::Clock
+                 : mode == IdleMode::Roam ? Shown::Roam : Shown::Game;
+    if (want == Shown::Game && games.mode() != mode) shown = Shown::Face;  // another game: start it afresh
+    if (static_cast<int32_t>(now - nextStatusMs) >= 0) {
+      nextStatusMs = now + 1000;
+      updateStatus();
+    }
+    if (want != shown) {
+      Shown was = shown;
+      shown = want;
+      if (was == Shown::Game) face.restoreInks();
+      if (was == Shown::Roam) roamStop();
+      if (want == Shown::Clock) {
         clockScreen.draw(now, true);  // the whole screen, over the face
-        // Readable, not dimmed like the sleeping face.
-        M5.Display.setBrightness(CLOCK_BRIGHTNESS ? CLOCK_BRIGHTNESS : max(awakeBrightness, (uint8_t)96));
-      } else {
+      } else if (want == Shown::Game) {
+        M5.Display.fillScreen(TFT_BLACK);
+        games.reset(mode);
+        games.setInks();
+        clockScreen.drawStrips(now, true, gfx.bandY(), gfx.bandY() + gfx.height());
+        nextGameMs = now;
+      } else {  // the face: awake or asleep (roaming too)
         M5.Display.fillScreen(BACKGROUND_COLOR);
         face.redrawBackdrop();
+        if (want == Shown::Roam) roamStart(now);
       }
-    } else if (clockShown) {
-      clockScreen.draw(now, false);  // only what changed (once a minute, or new weather)
+      // The clock and the games readable (night: dimmed); the sleeping face, roaming or not, a quarter.
+      shownClockBrightness = want == Shown::Clock || want == Shown::Game ? clockBrightness()
+                             : !face.asleep() ? awakeBrightness : max(awakeBrightness / 4, 8);
+      M5.Display.setBrightness(shownClockBrightness);
+      nextClockBrightMs = now + 1000;
+    } else if (shown == Shown::Clock || shown == Shown::Game) {
+      if (shown == Shown::Clock) clockScreen.draw(now, false);  // only what changed (a minute, the weather)
+      else clockScreen.drawStrips(now, false, gfx.bandY(), gfx.bandY() + gfx.height());
+      if (static_cast<int32_t>(now - nextClockBrightMs) >= 0) {  // new settings
+        nextClockBrightMs = now + 1000;
+        uint8_t b = clockBrightness();
+        if (b != shownClockBrightness) M5.Display.setBrightness(shownClockBrightness = b);
+      }
     }
-    if (clockShown) {
-      // drawn above
-    } else if (!deepSleep) {
+    if (shown == Shown::Game) {
+      if (static_cast<int32_t>(now - nextGameMs) >= 0) {
+        nextGameMs = now + GAME_FRAME_MS;
+        char t[16];
+        clockScreen.timeText(t, sizeof t);
+        games.step();
+        games.draw(t);
+      }
+    } else if (shown != Shown::Clock && !deepSleep) {
+      if (shown == Shown::Roam) roamUpdate(now);
       face.update(now);  // screen off in deep sleep: nothing to draw
     }
     diag.face = max(diag.face, micros() - tf);

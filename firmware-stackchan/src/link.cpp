@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-static const char* FW_VERSION = "0.6.2";
+static const char* FW_VERSION = "0.6.6";
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
@@ -186,6 +186,11 @@ void Link::handleMessage(const char* json) {
     cmd = String((doc["save"] | true) ? "facepack " : "facepreview ") + pack;
   } else if (!strcmp(type, "clock")) {
     cmd = String("clock ") + (doc["tz"] | "UTC0") + ((doc["h24"] | false) ? " 24" : " 12");
+  } else if (!strcmp(type, "screen")) {
+    cmd = String("screen ") + (doc["face"] | 0) + " " + (doc["clock"] | 0) + " " + (doc["night"] | 0) + " " +
+          (doc["n0"] | 1380) + " " + (doc["n1"] | 420) + " " + (doc["night_pct"] | 10) + " " + (doc["idle"] | 0);
+  } else if (!strcmp(type, "weather") && (doc["none"] | false)) {
+    cmd = "weather none";
   } else if (!strcmp(type, "weather")) {
     cmd = String("weather ") + (doc["temp"] | 0) + " " + (doc["hi"] | 0) + " " + (doc["lo"] | 0) + " " +
           (doc["code"] | -1) + " " + ((doc["day"] | true) ? 1 : 0) + " " + (doc["unit"] | "F") + " " +

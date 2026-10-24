@@ -438,7 +438,7 @@ different panel. The expressions themselves are drawn in `face.cpp`.
 Tests run with no hardware and no downloads:
 
 ```bash
-cd server && python -m unittest tests/test_personality.py tests/test_segmenter.py tests/test_voice.py tests/test_battery.py tests/test_alerts.py tests/test_stt.py tests/test_history.py tests/test_memories.py tests/test_lookup.py tests/test_body.py tests/test_faces.py tests/test_logbook.py
+cd server && python -m unittest tests/test_personality.py tests/test_segmenter.py tests/test_voice.py tests/test_battery.py tests/test_alerts.py tests/test_stt.py tests/test_history.py tests/test_memories.py tests/test_lookup.py tests/test_body.py tests/test_faces.py tests/test_logbook.py tests/test_settings.py
 ```
 
 ## Privacy and security

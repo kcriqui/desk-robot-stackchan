@@ -12,6 +12,7 @@ either way.
 from __future__ import annotations
 
 import os
+import re
 import time
 import zoneinfo
 
@@ -27,10 +28,17 @@ def _zone_name() -> str:
     return home.timezone if home is not None else ""
 
 
+def is_zone_name(text: str) -> bool:
+    """America/Los_Angeles, Etc/GMT+5: a zone database name, not a POSIX rule (CET-1CEST,M3.5.0,M10.5.0/3)."""
+    return bool(re.fullmatch(r"[A-Za-z_]+(/[A-Za-z0-9_+-]+)+", text or ""))
+
+
 def posix_tz() -> str:
-    if config.CLOCK_TZ:
+    """The robot's time zone as a POSIX rule: CLOCK_TZ (a zone name like America/Los_Angeles, or a rule as it is),
+    else this computer's."""
+    if config.CLOCK_TZ and not is_zone_name(config.CLOCK_TZ):
         return config.CLOCK_TZ
-    name = _zone_name()
+    name = config.CLOCK_TZ or _zone_name()
     if name:
         for base in zoneinfo.TZPATH:
             path = os.path.join(base, *name.split("/"))

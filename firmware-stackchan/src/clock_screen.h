@@ -26,16 +26,25 @@ class ClockScreen {
   // "clock <posix tz> [12|24]": the time zone (e.g. PST8PDT,M3.2.0,M11.1.0)
   // and the clock style. Saved when it changes.
   void setClock(const String& tz, bool h24);
-  // "weather <temp> <hi> <lo> <wmo code> <day 0|1> <F|C> <words...>"
+  // "weather <temp> <hi> <lo> <wmo code> <day 0|1> <F|C> <words...>", or "weather none"
   bool setWeather(const String& args);
+
+  // The WiFi and battery shown in the top corners: bars 0-4 (-1 = no WiFi), the charge in percent (-1 = no
+  // reading), and power: 0 on battery, 1 charging, 2 on USB and not charging. Redrawn when it changes.
+  void setStatus(int8_t bars, int8_t percent, uint8_t power);
 
   // Draws the whole screen (force) or just what changed: call while shown.
   void draw(uint32_t nowMs, bool force);
+  // With an idle game in the middle band: the date and the status above it, the weather below (force = all).
+  void drawStrips(uint32_t nowMs, bool force, int bandTop, int bandBottom);
+  // The time as the games show it ("7:35 PM", "19:35").
+  void timeText(char* out, size_t n) const;
   bool timeKnown() const;
   void printStatus() const;
 
  private:
   void drawIcon(int code, bool day, int cx, int cy);
+  void drawStatus();
   void drawDegree(int x, int y, int r, uint16_t color);
 
   String tz_ = "UTC0";
@@ -54,4 +63,8 @@ class ClockScreen {
     uint32_t atMs = 0;
   } wx_;
   uint32_t weatherSeq_ = 0;
+
+  int8_t bars_ = -2, percent_ = -2;  // -2: nothing drawn yet
+  uint8_t power_ = 255;
+  uint32_t statusSeq_ = 0, shownStatus_ = 0;
 };

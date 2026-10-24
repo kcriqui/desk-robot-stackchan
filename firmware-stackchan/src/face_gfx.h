@@ -39,6 +39,7 @@ class FaceGfx {
   void clear() { canvas_.fillSprite(BG); }
   void push() { canvas_.pushSprite(0, bandY_); }
   void setInk(Ink ink, uint32_t rgb888) { canvas_.setPaletteColor(ink, rgb888); }
+  void resetInks();  // the face's fixed inks back (after an idle game borrowed them)
 
   int width() const { return canvas_.width(); }    // screen pixels
   int height() const { return canvas_.height(); }
@@ -58,6 +59,9 @@ class FaceGfx {
   // drawWideLine: that one anti-aliases by reading pixels back, which
   // crashes on a palette canvas.
   void line(float ax, float ay, float bx, float by, float hw, uint8_t ink);
+  // Text at screen pixel x, y in `ink`, placed by `datum` (top_left, baseline_right...): the idle games.
+  void text(const char* s, int x, int y, const lgfx::IFont* font, uint8_t ink, uint8_t datum);
+  int textWidth(const char* s, const lgfx::IFont* font);
 
  private:
   M5Canvas canvas_{&M5.Display};

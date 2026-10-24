@@ -190,13 +190,9 @@ bool Face::applyPackJson(const char* json, bool save) {
     }
   }
   pack_ = n;
-  gfx_.setInk(FaceGfx::PLATE, n.plate.color);
-  gfx_.setInk(FaceGfx::RIM, n.plate.rimColor);
-  gfx_.setInk(FaceGfx::SOCKET, n.socket.color);
-  gfx_.setInk(FaceGfx::LENS, n.lensColor);
-  gfx_.setInk(FaceGfx::PUPIL, n.pupil >= 0 ? static_cast<uint32_t>(n.pupil) : 0x0A0C12);
-  backdropDirty_ = true;  // a plate came, went or changed: above and below the band too
+  restoreInks();
   Emotion e = emotion_;
+  backdropDirty_ = true;  // a plate came, went or changed: above and below the band too
   emotion_ = Emotion::COUNT;  // force setEmotion to pick up the new look
   setEmotion(e);
   if (still_) setStill(true, e);
@@ -214,6 +210,16 @@ bool Face::applyPackJson(const char* json, bool save) {
     prefs.end();
   }
   return true;
+}
+
+void Face::restoreInks() {
+  gfx_.resetInks();
+  gfx_.setInk(FaceGfx::PLATE, pack_.plate.color);
+  gfx_.setInk(FaceGfx::RIM, pack_.plate.rimColor);
+  gfx_.setInk(FaceGfx::SOCKET, pack_.socket.color);
+  gfx_.setInk(FaceGfx::LENS, pack_.lensColor);
+  if (pack_.pupil >= 0) gfx_.setInk(FaceGfx::PUPIL, static_cast<uint32_t>(pack_.pupil));
+  backdropDirty_ = true;
 }
 
 void Face::setStill(bool on, Emotion e) {

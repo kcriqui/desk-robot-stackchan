@@ -30,7 +30,8 @@ uint16_t grey() { return M5.Display.color565(0x8A, 0x94, 0xA6); }
 uint16_t ink() { return M5.Display.color565(0xEC, 0xE6, 0xD9); }
 
 // Screen regions (320 x 240).
-const int DATE_Y = 30, TIME_Y = 108, WX_TOP = 168;
+const int DATE_Y = 38, TIME_Y = 110, WX_TOP = 168;
+const int STATUS_H = 22;  // the WiFi and battery, in the top corners
 
 }  // namespace
 
@@ -95,6 +96,11 @@ void ClockScreen::setClock(const String& tz, bool h24) {
 }
 
 bool ClockScreen::setWeather(const String& args) {
+  if (args == "none") {  // the weather is switched off: just the time
+    wx_.valid = false;
+    weatherSeq_++;
+    return true;
+  }
   int temp, hi, lo, code, day;
   char unit;
   int used = 0;
@@ -125,6 +131,105 @@ void ClockScreen::printStatus() const {
                           : "none yet");
 }
 
+void ClockScreen::setStatus(int8_t bars, int8_t percent, uint8_t power) {
+  if (bars == bars_ && percent == percent_ && power == power_) return;
+  bars_ = bars;
+  percent_ = percent;
+  power_ = power;
+  statusSeq_++;
+}
+
+void ClockScreen::timeText(char* out, size_t n) const {
+  time_t t = time(nullptr);
+  tm local;
+  localtime_r(&t, &local);
+  if (!timeKnown()) {
+    strlcpy(out, "--:--", n);
+  } else if (h24_) {
+    snprintf(out, n, "%02d:%02d", local.tm_hour, local.tm_min);
+  } else {
+    int h = local.tm_hour % 12 == 0 ? 12 : local.tm_hour % 12;
+    snprintf(out, n, "%d:%02d %s", h, local.tm_min, local.tm_hour < 12 ? "AM" : "PM");
+  }
+}
+
+// WiFi bars at the top left; the battery at the top right: "charging", "USB", or the charge on battery.
+void ClockScreen::drawStatus() {
+  auto& d = M5.Display;
+  shownStatus_ = statusSeq_;
+  d.fillRect(0, 0, 70, STATUS_H, TFT_BLACK);
+  d.fillRect(d.width() - 110, 0, 110, STATUS_H, TFT_BLACK);
+  uint16_t dim = d.color565(0x3A, 0x42, 0x52);
+  for (int i = 0; i < 4; ++i) {
+    int h = 4 + i * 3;
+    d.fillRect(10 + i * 6, 17 - h, 4, h, bars_ > i ? ink() : dim);
+  }
+  if (bars_ < 0) {  // no WiFi: a cross over the bars
+    d.drawLine(9, 4, 31, 18, d.color565(0xFF, 0x4A, 0x3D));
+    d.drawLine(9, 18, 31, 4, d.color565(0xFF, 0x4A, 0x3D));
+  }
+  if (percent_ < 0 && power_ == 255) return;
+  // The battery: an outline and a fill in proportion, green / amber / red; a bolt while charging.
+  int bx = d.width() - 40, by = 5, bw = 26, bh = 12;
+  uint16_t fill = percent_ >= 40 ? d.color565(0x6A, 0xD2, 0x6A) : percent_ >= 15 ? amber() : d.color565(0xFF, 0x4A, 0x3D);
+  d.drawRect(bx, by, bw, bh, grey());
+  d.fillRect(bx + bw, by + 3, 3, bh - 6, grey());
+  int level = power_ == 0 ? constrain(percent_, 0, 100) : 100;
+  if (power_ != 0) fill = d.color565(0x6A, 0xD2, 0x6A);
+  d.fillRect(bx + 2, by + 2, (bw - 4) * level / 100, bh - 4, fill);
+  if (power_ == 1) {
+    uint16_t bolt = d.color565(0xFF, 0xF2, 0x7A);
+    int cx = bx + bw / 2;
+    d.fillTriangle(cx + 2, by - 1, cx - 4, by + 7, cx + 1, by + 7, bolt);
+    d.fillTriangle(cx - 1, by + 5, cx + 4, by + 5, cx - 2, by + bh + 1, bolt);
+  }
+  d.setFont(&fonts::FreeSans9pt7b);
+  d.setTextDatum(middle_right);
+  d.setTextColor(grey(), TFT_BLACK);
+  char txt[12];
+  if (power_ == 1) strlcpy(txt, "charging", sizeof txt);
+  else if (power_ == 2) strlcpy(txt, "USB", sizeof txt);
+  else snprintf(txt, sizeof txt, "%d%%", percent_);
+  d.drawString(txt, bx - 6, by + bh / 2 + 1);
+}
+
+void ClockScreen::drawStrips(uint32_t nowMs, bool force, int bandTop, int bandBottom) {
+  auto& d = M5.Display;
+  time_t t = time(nullptr);
+  tm local;
+  localtime_r(&t, &local);
+  int minute = timeKnown() ? local.tm_hour * 60 + local.tm_min : -2;
+  bool wxFresh = wx_.valid && nowMs - wx_.atMs < WEATHER_STALE_MS;
+  uint32_t wxKey = wxFresh ? weatherSeq_ : 0;
+  d.startWrite();
+  if (force || minute != shownMinute_) {  // the date, between the status corners
+    shownMinute_ = minute;
+    d.fillRect(70, 0, d.width() - 180, bandTop, TFT_BLACK);
+    d.fillRect(0, STATUS_H, d.width(), bandTop - STATUS_H, TFT_BLACK);
+    char line[24];
+    if (timeKnown()) strftime(line, sizeof line, "%a %b %e", &local);
+    else strlcpy(line, "waiting for the time", sizeof line);
+    d.setFont(&fonts::FreeSans9pt7b);
+    d.setTextDatum(middle_center);
+    d.setTextColor(grey(), TFT_BLACK);
+    d.drawString(line, d.width() / 2, bandTop / 2);
+  }
+  if (force || statusSeq_ != shownStatus_) drawStatus();
+  if (force || wxKey != shownWeather_) {  // the weather in a line under the band
+    shownWeather_ = wxKey;
+    d.fillRect(0, bandBottom, d.width(), d.height() - bandBottom, TFT_BLACK);
+    if (wxFresh) {
+      char line[64];
+      snprintf(line, sizeof line, "%d%c  %s   H %d  L %d", wx_.temp, wx_.unit, wx_.sky, wx_.hi, wx_.lo);
+      d.setFont(&fonts::FreeSans9pt7b);
+      d.setTextDatum(middle_center);
+      d.setTextColor(ink(), TFT_BLACK);
+      d.drawString(line, d.width() / 2, (bandBottom + d.height()) / 2);
+    }
+  }
+  d.endWrite();
+}
+
 void ClockScreen::draw(uint32_t nowMs, bool force) {
   auto& d = M5.Display;
   time_t t = time(nullptr);
@@ -133,14 +238,16 @@ void ClockScreen::draw(uint32_t nowMs, bool force) {
   int minute = timeKnown() ? local.tm_hour * 60 + local.tm_min : -2;
   bool wxFresh = wx_.valid && nowMs - wx_.atMs < WEATHER_STALE_MS;
   uint32_t wxKey = wxFresh ? weatherSeq_ : 0;
-  if (!force && minute == shownMinute_ && wxKey == shownWeather_) return;
+  if (!force && minute == shownMinute_ && wxKey == shownWeather_ && statusSeq_ == shownStatus_) return;
   if (force) d.fillScreen(TFT_BLACK);
   d.startWrite();
+  if (force || statusSeq_ != shownStatus_) drawStatus();
 
   if (force || minute != shownMinute_) {
     shownMinute_ = minute;
     // Date.
-    d.fillRect(0, 0, d.width(), WX_TOP - 4, TFT_BLACK);
+    d.fillRect(0, STATUS_H, d.width(), WX_TOP - 4 - STATUS_H, TFT_BLACK);
+    d.fillRect(70, 0, d.width() - 180, STATUS_H, TFT_BLACK);
     d.setTextDatum(middle_center);
     d.setFont(&fonts::FreeSans12pt7b);
     d.setTextColor(grey(), TFT_BLACK);
