@@ -293,7 +293,7 @@ a sentence or two and "Write it for me" has the language model draft the
 rest, Test voice plays it in the browser, and Import / Export / Duplicate
 move them around. Switching is instant and starts a fresh conversation
 (long-term memory stays). Switch from that tab, the dropdown in the header,
-the console (`character glados`), or by asking him ("let me talk to
+the console (`character glados`), or by asking the robot ("let me talk to
 GLaDOS"); `CHARACTER` in `server/.env` picks who he is at start. The
 example replies do more than the rules do: add real exchanges that came out
 well.

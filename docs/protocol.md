@@ -63,6 +63,7 @@ settle. The server takes either type.
 {"type": "stream", "on": true, "fps": 10}   // start/stop the camera stream, set rate
 {"type": "face", "save": true, "pack": {...}}  // firmware-stackchan 0.6.1+: a face pack (server/faces/*.json,
                                   // minus its description); save = keep it in flash. Sent on connect.
+                                  // 0.6.2+ also draw its plate, socket, lens and pupil colour
 {"type": "clock", "tz": "PST8PDT,M3.2.0,M11.1.0", "h24": false}  // firmware-stackchan 0.6.0+: the clock screen's
                                   // time zone (POSIX rule) and style; kept in flash. The robot gets the time
                                   // itself (SNTP) and keeps it in its clock chip. Sent on connect.
