@@ -44,7 +44,7 @@ import time
 
 import websockets
 
-from . import alerts, battery, clock, config, faces, mouth, personality, weather, web
+from . import alerts, battery, clock, config, faces, logbook, mouth, personality, weather, web
 from .body import Body
 from .dance import Dancer, length as dance_length
 from .memories import Memories
@@ -1176,6 +1176,14 @@ async def _console_command(action: str, payload: dict) -> dict:
         value = _number(payload, "value", *VOICE_TUNABLE[key])
         setattr(config, key, value)
         print(f"console: {key} = {value:g} (until restart; set it in config.py to keep)")
+    elif action == "console":  # the Log tab's command box: a line for the console, as if typed at it
+        line = str(payload.get("line", "")).strip()
+        if not line or len(line) > 300:
+            raise ValueError("a command is 1 to 300 characters")
+        if line.split()[0].lower() in ("quit", "exit"):
+            raise ValueError("quit stops the brain: restart its container instead")
+        print(f"> {line}")
+        asyncio.create_task(handle_console_line(line))  # `ask` takes longer than the page waits
     elif action == "character":
         await use_character(str(payload.get("id", "")))  # a ValueError goes back to the page
     elif action == "characters":  # the Personalities card: every character in full
@@ -1677,6 +1685,7 @@ async def console_loop() -> None:
 
 
 async def main() -> None:
+    logbook.install()  # the live view's Log tab
     print(f"{config.ROBOT_NAME} brain server — model {config.MODEL}")
     print(f"listening for the robot on ws://0.0.0.0:{config.PORT}")
     eyes.state_provider = console_state

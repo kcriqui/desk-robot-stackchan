@@ -161,6 +161,17 @@
              transition: translate .35s cubic-bezier(.3,1.3,.5,1), width .35s cubic-bezier(.3,1.3,.5,1); }
   @media (max-width: 640px) { .tabs [role=tab] { padding: 9px 13px; letter-spacing: .16em; } }
 
+  /* ── log (from cgro00's V2 dashboard) ──────────────────────────────── */
+  .log { position: relative; height: min(62vh, 640px); overflow: auto; margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 4px;
+         background: repeating-linear-gradient(0deg, rgba(255,255,255,.015) 0 1px, transparent 1px 3px), #05070b;
+         font: 12px/1.6 var(--mono); color: #cfd6e2; white-space: pre-wrap; overflow-wrap: anywhere; box-shadow: inset 0 0 30px rgba(0,0,0,.6); }
+  .log .said { color: var(--amber); }
+  .log .me { color: var(--muted); }
+  .log .err { color: var(--astro); }
+  .cmd { display: flex; gap: 10px; margin-top: 12px; align-items: center; }
+  .cmd::before { content: ">"; font: 600 15px var(--mono); color: var(--amber); }
+  .cmd input { font-family: var(--mono); }
+
   /* ── personalities ──────────────────────────────────────────────────── */
   button.primary { background: var(--amber); color: var(--void); border-color: var(--amber); }
   button.primary:hover { background: #f6c477; }
@@ -219,6 +230,7 @@
     <button type="button" role="tab" id="t-live" aria-controls="p-live" aria-selected="true">Live</button>
     <button type="button" role="tab" id="t-chars" aria-controls="p-chars" aria-selected="false" tabindex="-1">Personalities</button>
     <button type="button" role="tab" id="t-mem" aria-controls="p-mem" aria-selected="false" tabindex="-1">Memories</button>
+    <button type="button" role="tab" id="t-log" aria-controls="p-log" aria-selected="false" tabindex="-1">Log</button>
   </nav>
 
   <main class="deck" role="tabpanel" id="p-live" aria-labelledby="t-live">
@@ -366,6 +378,18 @@
         <button type="submit">Remember</button>
       </form>
       <p class="hint">Kept for good in server/data/memories.json and given to <span data-pron="1">him</span> in every conversation. You can also ask <span data-pron="1">him</span> to remember or forget things.</p>
+    </section>
+  </div>
+
+  <div role="tabpanel" id="p-log" aria-labelledby="t-log" hidden>
+    <section class="card tuning" aria-labelledby="l-log">
+      <h2 class="label" id="l-log"><span>Brain output</span><span class="sub" id="lognote"></span></h2>
+      <pre class="log" id="log" tabindex="0" aria-label="brain output"></pre>
+      <form class="cmd" id="cmdform">
+        <input type="text" id="cmd" placeholder="A console command: ask …, say …, character glados, memories, help" maxlength="300" autocomplete="off" spellcheck="false" aria-label="console command">
+        <button type="submit">Send</button>
+      </form>
+      <p class="hint">Commands go to the brain's own console, the same as typing at it (docker attach). The last 3,000 lines are kept, in memory only.</p>
     </section>
   </div>
 </div>
@@ -565,6 +589,7 @@
     }
     if (focus) tab.focus();
     placeTabGlow();
+    if (tab.id === "t-log") requestAnimationFrame(() => { const l = $("log"); l.scrollTop = l.scrollHeight; });  // the newest lines
     try { localStorage.setItem("rocky-tab", tab.id); } catch {}
   }
   tabs.forEach((tab, i) => {
@@ -586,9 +611,40 @@
   {
     let saved = null;
     try { saved = localStorage.getItem("rocky-tab"); } catch {}
-    const first = { "#personalities": "t-chars", "#memories": "t-mem", "#live": "t-live" }[location.hash] || saved;
+    const first = { "#personalities": "t-chars", "#memories": "t-mem", "#log": "t-log", "#live": "t-live" }[location.hash] || saved;
     selectTab($(first) || tabs[0]);
   }
+
+  // ── log ────────────────────────────────────────────────────────────────
+  let logSeq = 0, stick = true;
+  const logEl = $("log");
+  logEl.addEventListener("scroll", () => { stick = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 30; });
+  async function pollLog() {
+    try {
+      const j = await (await fetch("/log?after=" + logSeq)).json();
+      if (j.seq < logSeq) logEl.textContent = "";   // the brain restarted
+      logSeq = j.seq;
+      const frag = document.createDocumentFragment();
+      for (const line of j.lines) {
+        const span = document.createElement("span");
+        span.className = line.startsWith("> ") ? "me" : /error|traceback|exception|failed/i.test(line) ? "err"
+          : /^[\w' -]+ \[\w+\]( \(unasked\))?: /.test(line) ? "said" : "";
+        span.textContent = line + "\n"; frag.appendChild(span);
+      }
+      logEl.appendChild(frag);
+      while (logEl.childNodes.length > 3000) logEl.firstChild.remove();
+      if (j.lines.length && stick) logEl.scrollTop = logEl.scrollHeight;
+      $("lognote").textContent = "live";
+    } catch { $("lognote").textContent = "no brain"; }
+    // Quick while the tab is open, slow otherwise (it still catches up when opened).
+    setTimeout(pollLog, document.hidden ? 5000 : $("p-log").hidden ? 4000 : 1000);
+  }
+  pollLog();
+  $("cmdform").onsubmit = async ev => {
+    ev.preventDefault();
+    const line = $("cmd").value.trim(); if (!line) return;
+    try { await api("console", { line }); $("cmd").value = ""; } catch (e) { toast(e.message, true); }
+  };
 
   // ── personalities ──────────────────────────────────────────────────────
   // Ported from cgro00's V2 dashboard; our characters are personality.py's (Piper voices, all the lines).

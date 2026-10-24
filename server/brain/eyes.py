@@ -25,7 +25,7 @@ from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import config
+from . import config, logbook
 
 
 class Eyes:
@@ -198,6 +198,11 @@ class Eyes:
                     self._reply(200, "application/json", json.dumps(st).encode())
                 elif self.path == "/stream":
                     self._stream()
+                elif self.path.startswith("/log"):  # the Log tab: what the brain printed since line `after`
+                    q = self.path.partition("?")[2]
+                    after = next((v for k, _, v in (p.partition("=") for p in q.split("&")) if k == "after"), "0")
+                    seq, lines = logbook.since(int(after) if after.isdigit() else 0)
+                    self._reply(200, "application/json", json.dumps({"seq": seq, "lines": lines}).encode())
                 else:
                     self._reply(404, "text/plain", b"not found")
 
