@@ -124,14 +124,23 @@ if TTS_ENGINE not in ("auto", "fish", "piper", "builtin"):
 # computer, well under 0.1 s a sentence on a desktop CPU. Optional, and
 # GPL-3.0 licensed, so it's not in requirements.txt:
 #   pip install -r requirements-piper.txt
-# PIPER_VOICE in server/.env picks one of PIPER_VOICES. Each is tuned here:
-#   pitch   semitones up (+) or down (-); the voice keeps its size (Praat)
+# PIPER_VOICE in server/.env picks one of PIPER_VOICES for Rocky; another
+# character can pick its own (personality.py) and override these. Each is
+# tuned here (Piper Lab, .devtools/piper_lab, tries them all out):
+#   pitch   semitones up (+) or down (-)
+#   pitch_mode  "keep_size" (Praat moves the pitch, the voice keeps its size;
+#           the default) or "resample" (played faster: a smaller voice)
+#   intonation  the rise and fall: 1 = the voice's own, 0 = flat, >1 more
 #   speed   1 = the voice's own pace
 #   noise / noise_w   Piper's variation in sound / in timing; None = the
 #           voice's own default
+#   pause   silence after each sentence, s (PIPER_SENTENCE_PAUSE if not given)
+#   speaker for a voice with several ("speakers" lists them), which one
 # Voice files download once into DESK_ROBOT_CACHE (~60 MB each), pinned to a
 # revision of rhasspy/piper-voices and checked against a SHA-256 first. To
 # add a voice, try it in a Piper sandbox, then add it here with its hashes.
+# A community voice from elsewhere gives its own pinned "url" (the file name
+# without .onnx / .onnx.json).
 PIPER_REVISION = "5041a7a49ae5b3a0f30e6837769eb03fdbb231bd"
 PIPER_VOICES = {
     "en_US-ryan-medium": {  # chosen 2026-10-21
@@ -139,6 +148,32 @@ PIPER_VOICES = {
         "sha256": {
             ".onnx": "abf4c274862564ed647ba0d2c47f8ee7c9b717d27bdad9219100eb310db4047a",
             ".onnx.json": "44034c056cb15681b2ad494307c7f3f2e4499d1253c700c711fa0a4607ffe78d",
+        },
+    },
+    "en_US-kristin-medium": {  # a woman's voice; as tuned here it's plain, GLaDOS sets her own
+        "pitch": 0.0, "speed": 1.0, "noise": None, "noise_w": None,
+        "sha256": {
+            ".onnx": "5849957f929cbf720c258f8458692d6103fff2f0e3d3b19c8259474bb06a18d4",
+            ".onnx.json": "5681426d4aead22195de70531eeeeddb46493cfaffc5764b2ea3db73428b651c",
+        },
+    },
+    # GLaDOS, trained on her lines from Portal (Valve's): personal use only. A Piper export of the voice in
+    # github.com/dnhkng/GLaDOS; its own settings sound best (2026-10-23).
+    "en_US-glados-medium": {
+        "pitch": 0.0, "speed": 1.0, "noise": None, "noise_w": None,
+        "url": "https://huggingface.co/rokeya71/VITS-Piper-GlaDOS-en-onnx/resolve/"
+               "5852e4bfc742fdfc5dafcf94c06305695af37018/glados",
+        "sha256": {
+            ".onnx": "17ea16dd18e1bac343090b8589042b4052f1e5456d42cad8842a4f110de25095",
+            ".onnx.json": "01f5e602e1ec04daec6d54960e4d641b5de305f39186e40bf9b4a47bd757a489",
+        },
+    },
+    "en_GB-semaine-medium": {  # four British speakers; Juniper is spike, 3 semitones down (2026-10-23)
+        "pitch": 0.0, "speed": 1.0, "noise": None, "noise_w": None,
+        "speakers": ["prudence", "spike", "obadiah", "poppy"],
+        "sha256": {
+            ".onnx": "d6dab6f3b92db43ea3f78c7f20dc8eadb47a1f15d8a1c9d451cf3ccd201a2f66",
+            ".onnx.json": "6425dcb878684043b77d772b173ae006d86a583b110303edda48b8438ecee5ee",
         },
     },
     "en_US-hfc_male-medium": {  # plan B: its own defaults (it's set 25% faster than most)
@@ -307,6 +342,9 @@ EMOTIONS = [
 ]
 if BODY == "stackchan":
     EMOTIONS += ["curious", "skeptical", "excited", "love", "confused"]
+# Who the robot is: "rocky" (built in), or a character file in server/characters/
+# (personality.py). The console's `character` command switches until restart.
+CHARACTER = os.environ.get("CHARACTER", "rocky").strip() or "rocky"
 # Which face pack a StackChan draws (server/faces/<id>.json, or custom/<id>):
 # rocky, bean, blocky or visor. The console can switch until the next restart.
 FACE_PACK = os.environ.get("FACE_PACK", "rocky").strip() or "rocky"

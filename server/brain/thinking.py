@@ -153,6 +153,23 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "switch_character",
+            "description": (
+                "Hand the robot over to another character (your instructions list them) when your human "
+                "clearly asks to talk to them or to switch: \"let me talk to GLaDOS\", \"go back to Rocky\". "
+                "Never on a passing mention of a name. Say a short goodbye in your own voice first; the other "
+                "character greets your human themselves."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"who": {"type": "string", "description": "The character's id from your instructions."}},
+                "required": ["who"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "cancel_timer",
             "description": "Cancel a timer you set, by what it's for, or \"all\".",
             "parameters": {

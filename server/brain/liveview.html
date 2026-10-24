@@ -57,6 +57,8 @@
   .vitals .k { font: 10px var(--display); letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }
   .vitals .v { font: 500 14px var(--mono); color: var(--ink); }
   .vitals .v.warn { color: var(--astro); }
+  .vitals select.v { background: transparent; border: 1px solid var(--line-strong); border-radius: 4px; padding: 1px 4px; margin: -2px 0 -2px -5px; cursor: pointer; }
+  .vitals select.v option { background: var(--panel); color: var(--ink); }
 
   /* ── layout ─────────────────────────────────────────────────────────── */
   .deck { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: 22px; align-items: start; }
@@ -146,6 +148,50 @@
   .mems .when { font: 11px var(--mono); color: var(--muted); }
   .mems button { padding: 3px 9px; }
   @media (max-width: 560px) { .mems li { grid-template-columns: minmax(0, 1fr) auto; } .mems .when { grid-column: 1; grid-row: 2; } }
+  /* ── tabs (from cgro00's V2 dashboard) ────────────────────────────────── */
+  [role=tabpanel][hidden] { display: none; }
+  .tabs { position: relative; display: flex; gap: 2px; width: max-content; max-width: 100%; margin: 0 0 22px; padding: 4px;
+          background: rgba(9,12,19,.7); border: 1px solid var(--line-strong); border-radius: 999px; overflow-x: auto; scrollbar-width: none; }
+  .tabs [role=tab] { position: relative; z-index: 1; font: 600 11px var(--display); letter-spacing: .22em; text-transform: uppercase; color: var(--muted);
+                     background: none; border: 0; border-radius: 999px; padding: 9px 20px; transition: color .25s; }
+  .tabs [role=tab]:hover { color: var(--ink); }
+  .tabs [role=tab][aria-selected=true] { color: var(--void); }
+  .tabglow { position: absolute; top: 4px; bottom: 4px; left: 0; width: 0; border-radius: 999px; background: var(--amber);
+             box-shadow: 0 0 18px rgba(242,180,92,.35), inset 0 1px 0 rgba(255,255,255,.35);
+             transition: translate .35s cubic-bezier(.3,1.3,.5,1), width .35s cubic-bezier(.3,1.3,.5,1); }
+  @media (max-width: 640px) { .tabs [role=tab] { padding: 9px 13px; letter-spacing: .16em; } }
+
+  /* ── personalities ──────────────────────────────────────────────────── */
+  button.primary { background: var(--amber); color: var(--void); border-color: var(--amber); }
+  button.primary:hover { background: #f6c477; }
+  .visually-hidden { position: absolute; clip-path: inset(50%); overflow: hidden; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; white-space: nowrap; }
+  .linkish { color: var(--amber); cursor: pointer; text-decoration: underline; font-size: 13px; }
+  .linkish:focus-within { outline: 2px solid var(--amber); outline-offset: 2px; }
+  .packs { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+  .packcard { display: grid; gap: 4px; padding: 9px 11px; text-align: left; background: #090c13; }
+  .packcard[aria-pressed=true] { border-color: var(--amber); background: linear-gradient(0deg, var(--amber-dim), transparent 70%), #090c13; }
+  .packcard .cname { font: 600 13px var(--body); }
+  .packcard .ptags { font: 11px var(--mono); color: var(--muted); }
+  .packcard .ptags.on { color: var(--amber); }
+  .chardetail { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 28px; align-items: start; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  .set { display: grid; gap: 6px; padding: 10px 0; border: 0; margin: 0; min-width: 0; }
+  .set ~ .set { border-top: 1px dashed var(--line); }
+  .set > .k { padding: 0; font: 10px var(--display); letter-spacing: .2em; text-transform: uppercase; color: var(--muted); }
+  .charform textarea, .charform select, .charform input[type=number] { width: 100%; font: 14px var(--body); color: var(--ink); background: #090c13;
+    border: 1px solid var(--line-strong); border-radius: 4px; padding: 7px 9px; }
+  .charform textarea { resize: vertical; line-height: 1.45; }
+  .charform .hint { margin: 0; }
+  .vgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+  .vgrid label, .lines label { display: grid; gap: 4px; font: 12px var(--body); color: var(--muted); }
+  .lines { display: grid; gap: 8px; }
+  .charform details summary { cursor: pointer; color: var(--muted); font-size: 12px; padding: 4px 0; }
+  .charform details .lines { margin-top: 8px; }
+  .saved { font: 11px var(--mono); color: var(--muted); letter-spacing: 0; text-transform: none; }
+  .saved.ok { color: #8fd694; }
+  .saved.ok::before { content: "\2713  "; }
+  .hint.warn { color: var(--astro); }
 
   @media (prefers-reduced-motion: reduce) { .viewport, .horizon, .meridian, button, h1 .dot { transition: none; } }
 </style>
@@ -154,20 +200,28 @@
 <div class="console">
   <header class="top">
     <div>
-      <div class="eyebrow">Hail Mary · desk unit · <span id="clock">--:--:--</span> local</div>
-      <h1>{name}<span class="dot" id="linkdot" title="robot link"></span></h1>
+      <div class="eyebrow">Desk unit · <span id="clock">--:--:--</span> local</div>
+      <h1><span id="robotname">{name}</span><span class="dot" id="linkdot" title="robot link"></span></h1>
     </div>
     <ul class="vitals">
       <li><span class="k">Link</span><span class="v" id="link">—</span></li>
       <li><span class="k">Camera</span><span class="v" id="fps">—</span></li>
       <li><span class="k">Hull</span><span class="v" id="temp">—</span></li>
       <li id="powerrow" hidden><span class="k">Power</span><span class="v" id="power">—</span></li>
+      <li id="charrow" hidden><span class="k">Character</span><select class="v" id="character" aria-label="character"></select></li>
       <li><span class="k">State</span><span class="v" id="state">—</span></li>
       <li><span class="k">Ears</span><span class="v" id="mic">—</span></li>
     </ul>
   </header>
 
-  <main class="deck">
+  <nav class="tabs" role="tablist" aria-label="console">
+    <span class="tabglow" id="tabglow" aria-hidden="true"></span>
+    <button type="button" role="tab" id="t-live" aria-controls="p-live" aria-selected="true">Live</button>
+    <button type="button" role="tab" id="t-chars" aria-controls="p-chars" aria-selected="false" tabindex="-1">Personalities</button>
+    <button type="button" role="tab" id="t-mem" aria-controls="p-mem" aria-selected="false" tabindex="-1">Memories</button>
+  </nav>
+
+  <main class="deck" role="tabpanel" id="p-live" aria-labelledby="t-live">
     <section aria-labelledby="l-sees">
       <h2 class="label" id="l-sees"><span><span class="pname">{name}</span> sees</span><span class="sub" id="framenote"></span></h2>
       <div class="viewport dark" id="viewport">
@@ -180,7 +234,7 @@
       <div class="card" style="margin-top:16px">
         <h2 class="label"><span><span class="pname">{name}</span> hears</span><span class="sonar-state" id="hearstate">—</span></h2>
         <div class="sonar"><canvas id="wave"></canvas></div>
-        <p class="hint" style="margin-top:6px">Last 8 seconds of sound. Gold bars are speech, red is his own voice.</p>
+        <p class="hint" style="margin-top:6px">Last 8 seconds of sound. Gold bars are speech, red is <span data-pron="2">his</span> own voice.</p>
         <p class="line"><span class="who">You</span><span class="text" id="heard"></span></p>
         <p class="line said"><span class="who pname">{name}</span><span class="text" id="said"></span></p>
       </div>
@@ -207,9 +261,9 @@
         <form class="row" id="sayform">
           <input type="text" id="saytext" placeholder="Words for {name}…" maxlength="300" autocomplete="off">
           <button type="submit" data-act="say">Say it</button>
-          <button type="button" data-act="ask">Ask him</button>
+          <button type="button" data-act="ask">Ask <span data-pron="1">him</span></button>
         </form>
-        <p class="hint">Say it speaks the words as written. Ask him sends them to his brain.</p>
+        <p class="hint">Say it speaks the words as written. Ask <span data-pron="1">him</span> sends them to <span data-pron="2">his</span> brain.</p>
         <div class="tune-grid" id="voicetunes" style="margin-top:12px"></div>
         <p class="hint">Speaker tuning · applies from the next reply · keep it in server/brain/config.py</p>
       </div>
@@ -222,6 +276,88 @@
       </div>
     </aside>
 
+    <section class="card tuning" aria-labelledby="l-tune">
+      <h2 class="label" id="l-tune"><span>Listening</span><span class="sub">changes apply now and last until the server restarts · keep one by setting it in server/brain/config.py</span></h2>
+      <div class="tune-grid" id="tunes"></div>
+    </section>
+  </main>
+
+  <div role="tabpanel" id="p-chars" aria-labelledby="t-chars" hidden>
+    <section class="card tuning" aria-labelledby="l-chars">
+      <h2 class="label" id="l-chars"><span>Personalities</span><span class="sub">who the robot is</span></h2>
+      <div class="packs" id="charlist"></div>
+      <div class="row" style="margin-top:14px">
+        <button type="button" class="primary" id="charnew">New personality</button>
+        <label class="linkish">Import a personality file…<input type="file" id="charimport" accept=".json,application/json" class="visually-hidden"></label>
+      </div>
+      <p class="hint">Switching is instant and starts a fresh conversation; memories stay, and the wake word is still the robot's. Yours are saved in server/characters/. A personality tells the language model how to behave: read one from someone else before you use it.</p>
+
+      <div class="chardetail">
+        <h2 class="label"><span id="chartitle">—</span><span class="saved" id="charsaved"></span></h2>
+        <p class="hint" id="chardesc" style="margin:-4px 0 12px"></p>
+        <div class="row" id="charactions">
+          <button type="button" class="primary" id="charuse">Use this personality</button>
+          <button type="button" id="charexport">Export</button>
+          <button type="button" id="chardup">Duplicate</button>
+          <button type="button" class="astro" id="chardelete">Delete</button>
+        </div>
+        <form id="charform" class="charform" novalidate hidden>
+          <div class="grid2">
+            <div>
+              <div class="set"><label class="k" for="c-name">Name</label>
+                <input type="text" id="c-name" maxlength="24" autocomplete="off" spellcheck="false" placeholder="Juniper">
+                <p class="hint">What the robot is called while being them. The wake word doesn't change.</p></div>
+              <div class="set"><label class="k" for="c-pron">Pronouns</label>
+                <select id="c-pron"><option value="he">he / him</option><option value="she">she / her</option><option value="they">they / them</option><option value="it">it / its</option></select>
+                <p class="hint">Told to the language model, and used for the wording on this page.</p></div>
+              <div class="set"><label class="k" for="c-desc">Describe the personality</label>
+                <textarea id="c-desc" rows="4" maxlength="1000" placeholder="A dramatic old sea captain who's suspicious of technology and tells too many stories about the sea."></textarea>
+                <div class="row"><button type="button" class="primary" id="c-draft">Write it for me</button></div>
+                <p class="hint">The language model writes who they are, how they talk, the examples and the lines from this. Press it again for a different take (each costs a fraction of a cent), then edit anything you like.</p></div>
+              <fieldset class="set"><legend class="k">Voice</legend>
+                <div class="row"><select id="c-voice" aria-label="Piper voice" style="flex:1"></select><button type="button" id="c-test">Test voice</button></div>
+                <div class="vgrid">
+                  <label>Pitch (semitones)<input type="number" id="c-v-pitch" step="0.5" min="-12" max="12" placeholder="0"></label>
+                  <label>Pitch by<select id="c-v-pitch_mode"><option value="">default</option><option value="resample">resampling</option><option value="keep_size">keeping size</option></select></label>
+                  <label>Intonation (×)<input type="number" id="c-v-intonation" step="0.1" min="0" max="2" placeholder="1"></label>
+                  <label>Speed (×)<input type="number" id="c-v-speed" step="0.05" min="0.5" max="2" placeholder="1"></label>
+                  <label>Noise<input type="number" id="c-v-noise" step="0.05" min="0" max="1.5" placeholder="voice's"></label>
+                  <label>Noise w<input type="number" id="c-v-noise_w" step="0.05" min="0" max="1.5" placeholder="voice's"></label>
+                  <label>Pause (s)<input type="number" id="c-v-pause" step="0.05" min="0" max="2" placeholder="voice's"></label>
+                  <label id="c-v-speaker-l" hidden>Speaker<select id="c-v-speaker"></select></label>
+                </div>
+                <p class="hint" id="c-voicehint">A Piper voice from config.py and its tuning; blank = the voice's own. Tune one by ear in Piper Lab (.devtools/piper_lab), then copy its numbers here. Test voice plays a sample here on this computer.</p></fieldset>
+              <div class="set"><label class="k" for="c-face">Face pack</label>
+                <select id="c-face"></select></div>
+            </div>
+            <div>
+              <div class="set"><label class="k" for="c-identity">Who they are</label>
+                <textarea id="c-identity" rows="12" maxlength="6000" spellcheck="true"></textarea>
+                <p class="hint">Second person: “You are …”. Write {human} where your name goes. The robot's own rules (short spoken replies, the camera, the head, the face, memory, search) are added for every personality.</p></div>
+              <div class="set"><label class="k" for="c-style">How they talk</label>
+                <textarea id="c-style" rows="7" maxlength="6000" spellcheck="true"></textarea></div>
+              <div class="set"><label class="k" for="c-emotions">Their faces</label>
+                <textarea id="c-emotions" rows="2" maxlength="1000" placeholder="Which face tags suit them, and what each means for them."></textarea></div>
+              <div class="set"><label class="k" for="c-examples">Example replies</label>
+                <textarea id="c-examples" rows="8" maxlength="6000"></textarea>
+                <p class="hint" id="c-exhint">One per line, each starting with a face: [happy], [thinking]… These shape how they sound more than anything.</p></div>
+              <fieldset class="set"><legend class="k">Said without thinking</legend>
+                <div class="lines" id="c-lines"></div>
+                <details><summary>Timers, battery, heat, power and the rest</summary><div class="lines" id="c-morelines"></div></details>
+                <p class="hint">Blank = the plain line shown. Keep its {placeholders}.</p></fieldset>
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button type="button" class="primary" id="c-save" disabled>Save</button>
+            <button type="button" id="c-saveuse" disabled>Save and use</button>
+            <button type="button" id="c-revert" disabled>Undo changes</button>
+          </div>
+        </form>
+      </div>
+    </section>
+  </div>
+
+  <div role="tabpanel" id="p-mem" aria-labelledby="t-mem" hidden>
     <section class="card tuning" aria-labelledby="l-mem">
       <h2 class="label" id="l-mem"><span><span class="pname">{name}</span> remembers</span><span class="sub" id="memnote"></span></h2>
       <ul class="mems" id="mems"></ul>
@@ -229,31 +365,43 @@
         <input type="text" id="memtext" placeholder="A fact for {name} to keep…" maxlength="200" autocomplete="off">
         <button type="submit">Remember</button>
       </form>
-      <p class="hint">Kept for good in server/data/memories.json and given to him in every conversation. He also remembers and forgets things himself when you ask.</p>
+      <p class="hint">Kept for good in server/data/memories.json and given to <span data-pron="1">him</span> in every conversation. You can also ask <span data-pron="1">him</span> to remember or forget things.</p>
     </section>
-
-    <section class="card tuning" aria-labelledby="l-tune">
-      <h2 class="label" id="l-tune"><span>Listening</span><span class="sub">changes apply now and last until the server restarts · keep one by setting it in server/brain/config.py</span></h2>
-      <div class="tune-grid" id="tunes"></div>
-    </section>
-  </main>
+  </div>
 </div>
 <div class="toast" id="toast"></div>
 
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  const NAME = "{name}";
+  let NAME = "{name}";
+  const PRONOUNS = { he: ["he", "him", "his"], she: ["she", "her", "her"], they: ["they", "them", "their"], it: ["it", "it", "its"] };
+  let pron = "he";
+  const P = form => PRONOUNS[pron][form];   // 0 subject, 1 object, 2 possessive
+  function showPronouns(p) {   // the character's (personality.py): "Ask her", "red is their own voice"
+    if (!PRONOUNS[p] || p === pron) return;
+    pron = p;
+    document.querySelectorAll("[data-pron]").forEach(e => { e.textContent = P(+e.dataset.pron); });
+  }
+  function showName(name) {   // the character he is right now (personality.name())
+    if (!name || name === NAME) return;
+    NAME = name;
+    document.title = name + " · live";
+    $("robotname").textContent = name;
+    document.querySelectorAll(".pname").forEach(e => { e.textContent = name; });
+    $("saytext").placeholder = "Words for " + name + "…";
+    $("memtext").placeholder = "A fact for " + name + " to keep…";
+  }
   let EMOTIONS = ["neutral", "happy", "sad", "angry", "surprised", "sleepy", "thinking"];  // the brain's list replaces it
   const TUNES = [
     { key: "VAD_THRESHOLD",    name: "Hears speech above",   help: "lower = more sensitive",            min: 0.1, max: 0.95, step: 0.05 },
-    { key: "TURN_THRESHOLD",   name: "Sure you're finished", help: "raise if he cuts you off",          min: 0.1, max: 0.95, step: 0.05 },
-    { key: "TURN_MAX_SILENCE", name: "Longest pause",        help: "seconds he waits when unsure",      min: 0.5, max: 6,    step: 0.1, unit: " s" },
+    { key: "TURN_THRESHOLD",   name: "Sure you're finished", help: "raise if you get cut off",          min: 0.1, max: 0.95, step: 0.05 },
+    { key: "TURN_MAX_SILENCE", name: "Longest pause",        help: "seconds to wait when unsure",      min: 0.5, max: 6,    step: 0.1, unit: " s" },
     { key: "AWAKE_SECONDS",    name: "Stays awake",          help: "after you last spoke",              min: 10,  max: 600,  step: 5,   unit: " s" },
   ];
   // Speaker tuning: applies from the next reply.
   const VOICE = [
-    { key: "TTS_LEVEL",       name: "Voice level", help: "loudness he's held to; prefer volume for overall", min: 0.08, max: 0.40, step: 0.01 },
+    { key: "TTS_LEVEL",       name: "Voice level", help: "loudness the voice is held to; prefer volume for overall", min: 0.08, max: 0.40, step: 0.01 },
     { key: "TTS_HIGHPASS_HZ", name: "Bass cut",    help: "0 = off · deep voices rattle the speaker; try 250-350", min: 0, max: 600, step: 10, unit: " Hz" },
     { key: "TTS_PRESENCE_DB", name: "Presence",    help: "lift above 1.5 kHz for a muffled voice · too much = thin", min: 0, max: 12, step: 0.5, unit: " dB" },
   ];
@@ -289,6 +437,18 @@
     }
   }
   faceButtons(EMOTIONS);
+  $("character").onchange = () => act("character", { id: $("character").value }, "Now: " + $("character").selectedOptions[0].textContent);
+  let charsShown = "";
+  function showCharacters(list, current) {   // who he is (personality.py); switching starts a fresh conversation
+    const sel = $("character");
+    $("charrow").hidden = !list || list.length < 2;
+    const key = JSON.stringify(list);
+    if (key !== charsShown) {
+      charsShown = key; sel.replaceChildren();
+      for (const c of list || []) { const o = document.createElement("option"); o.value = c.id; o.textContent = c.name; sel.appendChild(o); }
+    }
+    if (current && document.activeElement !== sel) sel.value = current;
+  }
   $("facepack").onchange = () => act("face", { id: $("facepack").value }, "Face pack: " + $("facepack").value);
   let packsShown = "";
   function showPacks(list, current) {   // a StackChan's face packs (server/faces/)
@@ -358,7 +518,7 @@
     $("memnote").textContent = list && list.length ? list.length + (list.length === 1 ? " fact" : " facts") : "";
     if (!list || !list.length) {
       const li = document.createElement("li"); li.className = "empty";
-      li.textContent = "Nothing yet. Tell him something worth keeping, or add it here.";
+      li.textContent = "Nothing yet. Tell " + P(1) + " something worth keeping, or add it here.";
       ul.appendChild(li); return;
     }
     for (const m of list) {   // textContent throughout: facts come from speech
@@ -395,6 +555,242 @@
     }
   }
 
+  // ── tabs ───────────────────────────────────────────────────────────────
+  const tabs = [...document.querySelectorAll("[role=tab]")];
+  function selectTab(tab, focus) {
+    for (const x of tabs) {
+      const on = x === tab;
+      x.setAttribute("aria-selected", on); x.tabIndex = on ? 0 : -1;
+      $(x.getAttribute("aria-controls")).hidden = !on;
+    }
+    if (focus) tab.focus();
+    placeTabGlow();
+    try { localStorage.setItem("rocky-tab", tab.id); } catch {}
+  }
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => selectTab(tab));
+    tab.addEventListener("keydown", ev => {
+      const n = { ArrowRight: 1, ArrowLeft: -1 }[ev.key];
+      if (n) { ev.preventDefault(); selectTab(tabs[(i + n + tabs.length) % tabs.length], true); }
+      if (ev.key === "Home") { ev.preventDefault(); selectTab(tabs[0], true); }
+      if (ev.key === "End") { ev.preventDefault(); selectTab(tabs[tabs.length - 1], true); }
+    });
+  });
+  function placeTabGlow() {   // the lit pill behind the selected tab slides to it
+    const tab = tabs.find(x => x.getAttribute("aria-selected") === "true"), g = $("tabglow");
+    if (!tab || !tab.offsetWidth) return;
+    g.style.width = tab.offsetWidth + "px"; g.style.translate = tab.offsetLeft + "px 0";
+  }
+  window.addEventListener("resize", placeTabGlow);
+  document.fonts?.ready.then(placeTabGlow);
+  {
+    let saved = null;
+    try { saved = localStorage.getItem("rocky-tab"); } catch {}
+    const first = { "#personalities": "t-chars", "#memories": "t-mem", "#live": "t-live" }[location.hash] || saved;
+    selectTab($(first) || tabs[0]);
+  }
+
+  // ── personalities ──────────────────────────────────────────────────────
+  // Ported from cgro00's V2 dashboard; our characters are personality.py's (Piper voices, all the lines).
+  const cstate = { list: [], active: "rocky", sel: "rocky", isNew: false, saved: null, dirty: false, meta: null };
+  const charOf = id => cstate.list.find(c => c.id === id);
+  const MAIN_LINES = ["wake", "sleep", "track_on", "track_off"];
+  const LINE_NAMES = { wake: "Woken with nothing else said", sleep: "Going to sleep", track_on: "Starting to follow your face",
+    track_off: "Stopping", search: "Before a web search", dance: "Before dancing", timer: "A timer is done (with what it's for)",
+    timer_plain: "A timer is done", battery_low: "Battery low", battery_very_low: "Battery very low", battery_critical: "Battery critical",
+    battery_saved: "Plugged in again", power_off_idle: "Powering off after a long quiet", power_off_idle_timers: "…with a timer still set",
+    power_off_battery: "Powering off, battery empty", hot: "Running hot", very_hot: "Too hot" };
+  const VKEYS = ["pitch", "pitch_mode", "intonation", "speed", "noise", "noise_w", "pause", "speaker"];
+  function showSpeakers(want) {   // a voice with several speakers (config.py "speakers") picks one
+    const list = cstate.meta.speakers?.[$("c-voice").value] || [], sel = $("c-v-speaker");
+    $("c-v-speaker-l").hidden = !list.length;
+    const keep = want ?? sel.value;
+    sel.replaceChildren(...list.map(n => { const o = document.createElement("option"); o.value = o.textContent = n; return o; }));
+    if (list.includes(keep)) sel.value = keep;
+  }
+  $("c-voice").addEventListener("change", () => showSpeakers());
+  async function loadChars(selectId) {
+    try {
+      const j = await api("characters");
+      cstate.list = j.characters; cstate.active = j.active; cstate.meta = j;
+      fillCharMeta();
+      renderCharList();
+      if (!cstate.isNew || selectId) selectChar(selectId || (charOf(cstate.sel) ? cstate.sel : cstate.active), true);
+    } catch (e) { toast(e.message, true); }
+  }
+  let metaShown = false;
+  function fillCharMeta() {   // the voice and face pack choices, and the line boxes, once
+    if (metaShown) return; metaShown = true;
+    const m = cstate.meta;
+    for (const v of m.voices) { const o = document.createElement("option"); o.value = v; o.textContent = v + (v === m.default_voice ? " (default)" : ""); $("c-voice").appendChild(o); }
+    const d = document.createElement("option"); d.value = ""; d.textContent = "the default (" + m.default_face + ")"; $("c-face").appendChild(d);
+    for (const p of m.face_packs) { const o = document.createElement("option"); o.value = p; o.textContent = p; $("c-face").appendChild(o); }
+    if (!m.piper) { $("c-voicehint").textContent = "The brain speaks with Fish Audio (TTS_ENGINE), so these Piper settings aren't used."; $("c-voicehint").classList.add("warn"); $("c-test").disabled = true; }
+    const box = (key, plain) => {
+      const l = document.createElement("label"); l.textContent = LINE_NAMES[key] || key;
+      const i = document.createElement("input"); i.type = "text"; i.id = "c-l-" + key; i.maxLength = 300; i.placeholder = plain; l.appendChild(i);
+      return l;
+    };
+    for (const k of MAIN_LINES) $("c-lines").appendChild(box(k, m.lines[k]));
+    $("c-morelines").appendChild(box("search", "a few words before searching"));
+    $("c-morelines").appendChild(box("dance", "a few words before dancing"));
+    for (const k of Object.keys(m.lines)) if (!MAIN_LINES.includes(k)) $("c-morelines").appendChild(box(k, m.lines[k]));
+  }
+  function renderCharList() {
+    const box = $("charlist"); box.replaceChildren();
+    for (const c of cstate.list) {
+      const b = document.createElement("button"); b.type = "button"; b.className = "packcard"; b.dataset.id = c.id;
+      b.setAttribute("aria-pressed", !cstate.isNew && c.id === cstate.sel);
+      const name = document.createElement("span"); name.className = "cname"; name.textContent = c.character.name;
+      const tags = document.createElement("span"); tags.className = "ptags";
+      tags.textContent = [c.id === cstate.active ? "In use" : "", c.builtin ? "Built-in" : "Yours",
+                          (c.character.voice.piper || cstate.meta.default_voice).replace(/^\w+-|-\w+$/g, "")].filter(Boolean).join(" · ");
+      if (c.id === cstate.active) tags.classList.add("on");
+      b.append(name, tags);
+      b.onclick = () => selectChar(c.id);
+      box.appendChild(b);
+    }
+  }
+  function confirmCharDiscard() { return !cstate.dirty || confirm("Throw away your unsaved changes to this personality?"); }
+  function selectChar(id, force) {
+    if (!force && (id !== cstate.sel || cstate.isNew) && !confirmCharDiscard()) return;
+    const c = charOf(id) || charOf("rocky"); if (!c) return;
+    cstate.sel = c.id; cstate.isNew = false;
+    for (const b of $("charlist").children) b.setAttribute("aria-pressed", b.dataset.id === c.id);
+    $("chartitle").textContent = c.character.name;
+    $("chardesc").textContent = c.builtin ? c.character.description + ". Duplicate him to make one of your own from his." : "";
+    $("charactions").hidden = false;
+    $("charuse").disabled = c.id === cstate.active; $("charuse").textContent = c.id === cstate.active ? "In use" : "Use this personality";
+    $("chardelete").hidden = c.builtin;
+    $("charform").hidden = c.builtin;
+    if (!c.builtin) fillCharForm(c.character);
+    markCharDirty(false); $("charsaved").textContent = "";
+  }
+  function blankChar() {
+    return { name: "", pronouns: "they", description: "", identity: "", style: "", emotions: "", examples: [], leads: {}, lines: {},
+             voice: { piper: cstate.meta.default_voice }, face: "" };
+  }
+  function newChar() {
+    if (!confirmCharDiscard()) return;
+    cstate.isNew = true; cstate.sel = null;
+    for (const b of $("charlist").children) b.setAttribute("aria-pressed", false);
+    $("chartitle").textContent = "New personality"; $("chardesc").textContent = "Name it, describe it, press Write it for me, then pick a voice.";
+    $("charactions").hidden = true; $("charform").hidden = false; $("charsaved").textContent = "";
+    fillCharForm(blankChar()); markCharDirty(false); $("c-name").focus();
+  }
+  function fillCharForm(ch) {
+    cstate.saved = JSON.parse(JSON.stringify(ch));
+    $("c-name").value = ch.name; $("c-desc").value = ch.description || ""; $("c-pron").value = ch.pronouns || "they";
+    $("c-identity").value = ch.identity || ""; $("c-style").value = ch.style || ""; $("c-emotions").value = ch.emotions || "";
+    $("c-examples").value = (ch.examples || []).join("\n");
+    for (const i of document.querySelectorAll("[id^=c-l-]")) { const k = i.id.slice(4); i.value = (k === "search" || k === "dance" ? ch.leads?.[k] : ch.lines?.[k]) || ""; }
+    const v = ch.voice || {};
+    $("c-voice").value = v.piper || cstate.meta.default_voice;
+    for (const k of VKEYS) if (k !== "speaker") $("c-v-" + k).value = v[k] ?? "";
+    showSpeakers(v.speaker || "");
+    $("c-face").value = cstate.meta.face_packs.includes(ch.face) ? ch.face : "";
+  }
+  function charFromForm() {
+    const lines = {}, leads = {};
+    for (const i of document.querySelectorAll("[id^=c-l-]")) {
+      const k = i.id.slice(4), t = i.value.trim();
+      if (t) (k === "search" || k === "dance" ? leads : lines)[k] = t;
+    }
+    const voice = { piper: $("c-voice").value };
+    for (const k of VKEYS) {
+      if (k === "speaker" && $("c-v-speaker-l").hidden) continue;
+      const t = $("c-v-" + k).value.trim(); if (t !== "") voice[k] = k === "pitch_mode" || k === "speaker" ? t : Number(t);
+    }
+    return { name: $("c-name").value.trim(), pronouns: $("c-pron").value, description: $("c-desc").value.trim(), identity: $("c-identity").value.trim(),
+             style: $("c-style").value.trim(), emotions: $("c-emotions").value.trim(),
+             examples: $("c-examples").value.split("\n").map(l => l.trim()).filter(Boolean), leads, lines, voice, face: $("c-face").value };
+  }
+  function markCharDirty(on) {
+    cstate.dirty = on;
+    $("c-save").disabled = !on; $("c-saveuse").disabled = !on && !cstate.isNew; $("c-revert").disabled = !on;
+    if (on) { $("charsaved").textContent = ""; $("charsaved").className = "saved"; }
+  }
+  $("charform").addEventListener("input", () => markCharDirty(true));
+  $("charform").addEventListener("change", () => markCharDirty(true));
+  $("charform").addEventListener("submit", ev => ev.preventDefault());
+  $("charnew").onclick = newChar;
+  $("c-revert").onclick = () => { fillCharForm(cstate.saved); markCharDirty(false); };
+
+  async function saveChar() {
+    const j = await api("character_save", { id: cstate.isNew ? null : cstate.sel, character: charFromForm() });
+    cstate.isNew = false; cstate.dirty = false;
+    await loadChars(j.id);
+    $("charsaved").textContent = j.id === cstate.active ? "saved · in use now" : "saved"; $("charsaved").className = "saved ok";
+    return j;
+  }
+  async function useChar(id) {
+    await api("character", { id });
+    toast("Now: " + (charOf(id)?.character.name || id));
+    await loadChars(id);
+  }
+  $("c-save").onclick = () => saveChar().catch(e => toast(e.message, true));
+  $("c-saveuse").onclick = async () => { try { const j = await saveChar(); if (j.id !== cstate.active) await useChar(j.id); } catch (e) { toast(e.message, true); } };
+  $("charuse").onclick = () => { if (confirmCharDiscard()) useChar(cstate.sel).catch(e => toast(e.message, true)); };
+  $("chardelete").onclick = async () => {
+    const c = charOf(cstate.sel);
+    if (!c || !confirm(`Delete the personality “${c.character.name}”? This can't be undone.`)) return;
+    try {
+      await api("character_delete", { id: c.id });
+      cstate.dirty = false; cstate.sel = "rocky";
+      toast(c.id === cstate.active ? "Deleted · back to Rocky" : "Deleted");
+      await loadChars("rocky");
+    } catch (e) { toast(e.message, true); }
+  };
+  $("chardup").onclick = async () => {
+    if (!confirmCharDiscard()) return;
+    const name = prompt("A name for the copy:", "");
+    if (!name) return;
+    try { const j = await api("character_save", { character: { ...charOf(cstate.sel).character, name } }); cstate.dirty = false; await loadChars(j.id); toast("Copied: edit away"); }
+    catch (e) { toast(e.message, true); }
+  };
+  $("charexport").onclick = () => {
+    const c = charOf(cstate.sel), blob = new Blob([JSON.stringify(c.character, null, 2) + "\n"], { type: "application/json" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = c.id + ".json"; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $("charimport").onchange = async () => {
+    const f = $("charimport").files[0]; $("charimport").value = "";
+    if (!f || !confirmCharDiscard()) return;
+    try {
+      const j = await api("character_save", { character: JSON.parse(await f.text()) });
+      cstate.dirty = false; cstate.isNew = false; await loadChars(j.id); toast(`Imported ${charOf(j.id)?.character.name || "the personality"}`);
+    } catch (e) { toast(e instanceof SyntaxError ? "That file isn't a personality (bad JSON)" : e.message, true); }
+  };
+
+  $("c-draft").onclick = async () => {
+    const ch = charFromForm(), b = $("c-draft");
+    if ((ch.identity || ch.examples.length) && !confirm("Replace what's written on the right with a new draft?")) return;
+    b.disabled = true; b.textContent = "Writing…";
+    try {
+      const d = (await api("character_draft", { name: ch.name, description: ch.description })).draft;
+      const before = cstate.saved;
+      fillCharForm({ ...ch, ...d, voice: ch.voice, face: ch.face });
+      cstate.saved = before; markCharDirty(true); toast("Written · read it over, then Save");
+    } catch (e) { toast(e.message, true); }
+    b.disabled = false; b.textContent = "Write it for me";
+  };
+  let sample = null;
+  $("c-test").onclick = async () => {
+    const ch = charFromForm(), b = $("c-test");
+    const first = ch.examples.map(l => l.replace(/^\s*\[\w+\]\s*/, "").trim()).find(Boolean);
+    const text = first || `Hi! I'm ${ch.name || "your new robot"}. This is how I sound.`;
+    b.disabled = true; b.textContent = "Loading…";
+    try {
+      const j = await api("character_voice", { character: ch, text });
+      if (sample) sample.pause();
+      sample = new Audio("data:audio/wav;base64," + j.wav);
+      await sample.play();
+    } catch (e) { toast(e.message, true); }
+    b.disabled = false; b.textContent = "Test voice";
+  };
+  window.addEventListener("beforeunload", ev => { if (cstate.dirty) { ev.preventDefault(); ev.returnValue = ""; } });
+  loadChars();
+
   // ── status loop ────────────────────────────────────────────────────────
   let lastSeq = -1;
   let brainStarted = null;
@@ -405,7 +801,7 @@
       // something is typed in a box, which a reload would lose).
       if (s.brain_started) {
         if (brainStarted === null) brainStarted = s.brain_started;
-        else if (s.brain_started !== brainStarted && !$("saytext").value && !$("memtext").value) {
+        else if (s.brain_started !== brainStarted && !$("saytext").value && !$("memtext").value && !cstate.dirty) {
           location.reload();
           return;
         }
@@ -427,7 +823,7 @@
         : s.thinking ? "thinking" : s.awake ? "awake" : s.deep_sleep ? "deep sleep" : "asleep";
       $("mic").textContent = s.listening ? (s.mic === "robot" ? "robot mic" : "Mac mic") : "off";
       $("awakenote").textContent = off ? "powered off at " + s.powered_off.at
-          + (s.powered_off.why === "battery" ? " (battery empty)" : " (idle)") + " · plug in USB or press his power button"
+          + (s.powered_off.why === "battery" ? " (battery empty)" : " (idle)") + " · plug in USB or press the power button"
         : s.awake ? "dozes off in " + Math.max(0, Math.round(s.awake_for)) + " s"
         : s.deep_sleep ? "deep sleep: screen off, saving battery · " + wakeHint : "asleep · " + wakeHint;
 
@@ -451,6 +847,10 @@
       if (s.volume != null && document.activeElement !== $("vol")) { $("vol").value = s.volume; $("volv").textContent = (+s.volume).toFixed(2); }
       if (s.emotions && s.emotions.join() !== EMOTIONS.join()) faceButtons(s.emotions);
       showPacks(s.face_packs, s.face_pack);
+      showCharacters(s.characters, s.character);
+      if (s.character && cstate.meta && s.character !== cstate.active) loadChars();
+      showName(s.name);
+      showPronouns(s.pronouns);
       for (const b of faces.children) b.classList.toggle("active", b.dataset.emotion === s.emotion);
       $("trackbtn").classList.toggle("active", !!s.tracking_enabled);
       $("trackbtn").textContent = s.tracking_enabled ? "Stop following" : "Follow my face";

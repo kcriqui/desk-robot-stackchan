@@ -33,8 +33,9 @@ server/debug/
 # Rocky's long-term memory (facts about you; memories.py)
 server/data/
 
-# Your own face packs (server/brain/faces.py)
+# Your own face packs (server/brain/faces.py) and characters (personality.py)
 server/faces/custom/
+server/characters/
 
 # Session file some tools drop at the repo root
 :memory:.ses

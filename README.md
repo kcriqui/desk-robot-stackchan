@@ -280,14 +280,23 @@ insists he is Rocky.
 
 ### Change the character
 
-`server/brain/personality.py` is the whole personality: one system prompt
-that pins down who he is and how he talks, plus a few canned lines for
-waking, sleeping, and tracking. To make a different character, rewrite the
-prompt. The parts worth keeping are the rules about being honest with the
-camera, the emotion tag at the start of every reply, and the sentence
-limit, because the face, the voice, and the cost all depend on them. Add
-real exchanges that came out well to the examples at the bottom; they do
-more than the rules do.
+Rocky is built in (`server/brain/personality.py`). Other characters live in
+`server/characters/*.json` (git-ignored), each with who they are, how they
+talk, example replies, the lines said without the model (timers, battery,
+sleep...), pronouns, a Piper voice and its tuning, and a face pack. The rest
+of the prompt is the same for everyone: honesty about the camera, the
+emotion tag at the start of every reply, the abilities, and the sentence
+limit, because the face, the voice, and the cost all depend on them.
+
+The live view's **Personalities** tab makes and edits them: describe one in
+a sentence or two and "Write it for me" has the language model draft the
+rest, Test voice plays it in the browser, and Import / Export / Duplicate
+move them around. Switching is instant and starts a fresh conversation
+(long-term memory stays). Switch from that tab, the dropdown in the header,
+the console (`character glados`), or by asking him ("let me talk to
+GLaDOS"); `CHARACTER` in `server/.env` picks who he is at start. The
+example replies do more than the rules do: add real exchanges that came out
+well.
 
 `REPLY_MAX_SENTENCES` in `config.py` caps how much he says per turn. The
 server cuts anything past it before it is spoken.

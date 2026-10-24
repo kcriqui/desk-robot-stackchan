@@ -57,7 +57,7 @@ from .tracker import Tracker
 robot_socket: websockets.ServerConnection | None = None
 robot_peer = ""          # the connected robot's address
 robot_fw = (0, 0, 0)     # its firmware version, from the hello
-face_pack = config.FACE_PACK  # the face pack he wears (server/faces/); the console can switch it
+face_pack = personality.face_pack()  # the face pack he wears (server/faces/); the console can switch it
 robot_heard_at = 0.0     # when it last sent anything (it sends something every few seconds)
 _greeting = 0            # connections waiting to say hello
 MAX_GREETING = 8         # more than this at once is a flood: refused at once
@@ -346,6 +346,14 @@ async def handle_console_line(line: str) -> bool:
             await set_volume(float(arg))
         except ValueError:
             print("usage: volume <0.0-1.0>")
+    elif cmd == "character":
+        if arg:
+            try:
+                await use_character(arg)
+            except ValueError as e:
+                print(e)
+        print(f"character: {personality.CHARACTER.id} (of {', '.join(c.id for c in characters())}; "
+              "CHARACTER in server/.env keeps one)")
     elif cmd == "face":
         global face_pack
         ids = [p["id"] for p in faces.list_packs() if "error" not in p]
@@ -375,7 +383,7 @@ async def handle_console_line(line: str) -> bool:
     elif cmd == "forget":
         print(forget({"about": arg})[0] if arg else "usage: forget <words | #number | all>")
     else:
-        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | face [pack] | dance [name] | gesture <emotion> | memories | remember <fact> | forget <words|#|all> | poweroff | status | quit")
+        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | character [id] | face [pack] | dance [name] | gesture <emotion> | memories | remember <fact> | forget <words|#|all> | poweroff | status | quit")
     return True
 
 
@@ -642,6 +650,37 @@ async def dance(args: dict) -> tuple:
             "nothing more, and don't describe the dance.", None, True)
 
 
+pending_character: str | None = None  # switch_character: who takes over once the goodbye has been spoken
+
+
+def switch_character(args: dict) -> tuple:
+    """The `switch_character` ability: the handover itself waits for the end of the reply (converse), so the
+    goodbye is spoken in the old voice and the new character's first words in theirs."""
+    global pending_character
+    who = str(args.get("who", "")).strip().lower()
+    chars = characters(fresh=True)
+    match = next((c for c in chars if who in (c.id, c.name.lower(), personality.name(c).lower())), None)
+    if match is None:
+        return (f"There's no character {who!r}. There are: " + ", ".join(c.id for c in chars), None)
+    if match.id == personality.CHARACTER.id:
+        return (f"You already are {match.name}.", None)
+    pending_character = match.id
+    return (f"{personality.name(match)} takes over as soon as you finish speaking. Your goodbye was enough: "
+            "say nothing more.", None, True)
+
+
+async def hand_over(char_id: str) -> None:
+    """Become the character switch_character picked, and let them say hello."""
+    try:
+        await use_character(char_id)
+    except ValueError as e:
+        print(f"(couldn't switch: {e})")
+        return
+    await send_to_robot({"type": "emotion", "name": "happy"})
+    print(f"{personality.name()} [happy]: {personality.LINES['wake']}")
+    await say(personality.LINES["wake"])
+
+
 async def _before_dancing() -> None:
     """The dance has the head: he's awake (the console's Dance button can start one while he sleeps), body language
     stops, face tracking goes off, no held pose."""
@@ -691,7 +730,7 @@ ABILITIES = {
     "dance": _sync(dance),
 }
 ABILITIES.update(check_temperature=check_temperature, set_timer=set_timer, cancel_timer=cancel_timer,
-                 remember=remember, forget=forget, check_weather=check_weather)
+                 remember=remember, forget=forget, check_weather=check_weather, switch_character=switch_character)
 searcher = web.WebSearch() if web.available() else None
 if searcher is not None:  # Anthropic as the provider (web.py)
     ABILITIES["web_search"] = web_search
@@ -777,7 +816,7 @@ class SpokenReply:
                 if not self.spoken:
                     self.tl.mark("first sentence")
                 self.spoken.append(sentence)
-                print(f"{config.ROBOT_NAME} [{brain.emotion}]: {sentence}")
+                print(f"{personality.name()} [{brain.emotion}]: {sentence}")
                 self.sentences.put(sentence)
         except Interrupted:
             pass
@@ -919,6 +958,7 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
         body.ponder()  # a glance up while he thinks
     global thinking
     thinking = True
+    global pending_character
     try:
         finished = await reply.play()
     except Exception as e:  # a speaker hiccup shouldn't kill the server
@@ -926,6 +966,7 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
         finished = True
     finally:
         thinking = False
+    switch_to, pending_character = pending_character, None
     if not finished:
         if body is not None:
             body.quiet()
@@ -938,6 +979,8 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
             loop.run_in_executor(None, check_tts, reply.text, b"".join(reply.pcm))
     awake_until = time.time() + config.AWAKE_SECONDS
     tl.report()
+    if switch_to:
+        await hand_over(switch_to)
     return True
 
 
@@ -992,6 +1035,17 @@ BRAIN_STARTED = time.time()  # the live view reloads itself when this changes: a
 _packs_cache: tuple[float, list[dict]] = (0.0, [])
 
 
+_chars_cache: tuple[float, list] = (0.0, [])
+
+
+def characters(fresh: bool = False) -> list:
+    """The characters there are (personality.available()), re-read at most every 10 s."""
+    global _chars_cache
+    if fresh or time.time() - _chars_cache[0] > 10:
+        _chars_cache = (time.time(), personality.available())
+    return _chars_cache[1]
+
+
 def face_packs() -> list[dict]:
     """The usable face packs, re-read at most every 10 s (the live view asks five times a second)."""
     global _packs_cache
@@ -1024,6 +1078,10 @@ def console_state() -> dict:
         "deep_sleep": robot_socket is not None and robot_deep_sleep,
         "brain_started": BRAIN_STARTED,
         "emotions": config.EMOTIONS,
+        "name": personality.name(),
+        "pronouns": personality.CHARACTER.pronouns,
+        "character": personality.CHARACTER.id,
+        "characters": [{"id": c.id, "name": personality.name(c)} for c in characters()],
         "face_pack": face_pack if config.BODY == "stackchan" else None,
         "face_packs": [p["id"] for p in face_packs()] if config.BODY == "stackchan" else [],
         "wake_word": robot_wake_word,  # the robot's own ("computer"), or None: his name wakes him
@@ -1037,7 +1095,7 @@ def console_command(action: str, payload: dict) -> dict:
     """A control from the page. Runs on the HTTP thread; hops onto the event
     loop. Raises ValueError for anything the page shouldn't have asked."""
     fut = asyncio.run_coroutine_threadsafe(_console_command(action, payload), main_loop)
-    return fut.result(timeout=10)
+    return fut.result(timeout=90 if action in ("character_draft", "character_voice") else 10)
 
 
 def _number(payload: dict, key: str, lo: float, hi: float) -> float:
@@ -1118,6 +1176,50 @@ async def _console_command(action: str, payload: dict) -> dict:
         value = _number(payload, "value", *VOICE_TUNABLE[key])
         setattr(config, key, value)
         print(f"console: {key} = {value:g} (until restart; set it in config.py to keep)")
+    elif action == "character":
+        await use_character(str(payload.get("id", "")))  # a ValueError goes back to the page
+    elif action == "characters":  # the Personalities card: every character in full
+        return {"characters": [{"id": c.id, "builtin": c.id == personality.ROCKY.id,
+                                "character": personality.to_dict(c)} for c in characters(fresh=True)],
+                "active": personality.CHARACTER.id, "voices": list(config.PIPER_VOICES),
+                "speakers": {k: v["speakers"] for k, v in config.PIPER_VOICES.items() if v.get("speakers")},
+                "default_voice": config.PIPER_VOICE, "face_packs": [p["id"] for p in face_packs()],
+                "default_face": config.FACE_PACK, "lines": personality.DEFAULT_LINES,
+                "piper": mouth.engine() == "piper"}
+    elif action == "character_save":
+        cid = payload.get("id") or None
+        cid = personality.save(payload.get("character"), cid)
+        characters(fresh=True)
+        print(f"console: saved character {cid}")
+        if cid == personality.CHARACTER.id:
+            await use_character(cid)  # the changes apply now
+        else:
+            personality.refresh()
+        return {"id": cid}
+    elif action == "character_delete":
+        cid = str(payload.get("id", ""))
+        personality.delete(cid)
+        characters(fresh=True)
+        print(f"console: deleted character {cid}")
+        if cid == personality.CHARACTER.id:
+            await use_character(personality.ROCKY.id)
+        else:
+            personality.refresh()
+        return {"name": personality.name()}
+    elif action == "character_draft":
+        loop = asyncio.get_running_loop()
+        draft = await loop.run_in_executor(None, personality.draft, brain.client,
+                                           payload.get("name"), payload.get("description"))
+        return {"draft": draft}
+    elif action == "character_voice":
+        import base64
+        c = payload.get("character") or {}
+        c = personality.parse("trial", {"name": "Trial", "identity": "-", "examples": ["[neutral] -"],
+                                        "voice": c.get("voice") or {}})
+        text = (str(payload.get("text") or "").strip()[:300] or "This is how I sound.").replace("{human}", config.HUMAN_NAME)
+        loop = asyncio.get_running_loop()
+        wav = await loop.run_in_executor(None, mouth.sample_wav, text, c)
+        return {"wav": base64.b64encode(wav).decode()}
     elif action == "face":
         global face_pack
         pid = str(payload.get("id", ""))
@@ -1275,7 +1377,7 @@ async def doze_loop() -> None:
             continue
         awake = now < awake_until
         if was_awake and not awake:
-            print(f"({config.ROBOT_NAME} dozed off — say \"hey {config.ROBOT_NAME}\" to wake him)")
+            print(f"({personality.name()} dozed off — say \"hey {config.ROBOT_NAME}\" to wake {personality.pronoun(1)})")
             await set_asleep(True)
             await set_head_held(False)  # idle life resumes; the head may wander again
         was_awake = awake
@@ -1328,10 +1430,10 @@ async def announce(key: str, emotion: str, **values) -> None:
     global awake_until
     text = personality.LINES[key].format(**values)
     if robot_socket is None:
-        print(f"(robot not connected; {config.ROBOT_NAME} would have said: {text})")
+        print(f"(robot not connected; {personality.name()} would have said: {text})")
         return
     async with turn_lock:
-        print(f"{config.ROBOT_NAME} [{emotion}] (unasked): {text}")
+        print(f"{personality.name()} [{emotion}] (unasked): {text}")
         if robot_asleep:
             await set_asleep(False)
         await send_to_robot({"type": "emotion", "name": emotion})
@@ -1355,6 +1457,29 @@ async def send_clock() -> None:
         return
     await send_to_robot({"type": "clock", "tz": clock.posix_tz(), "h24": config.CLOCK_24H})
     await send_weather()
+
+
+async def use_character(char_id: str) -> str:
+    """Become another character (personality.py): their prompt, lines, voice and face from the next word on. The
+    conversation starts fresh; long-term memory stays. ValueError if the character doesn't load."""
+    global face_pack
+    c = personality.use(char_id)
+    if brain is not None:
+        brain.history.clear()
+    face_pack = personality.face_pack()
+    await send_face_pack()
+    print(f"character: {c.name} (voice {personality.voice()[0]}, face {face_pack})")
+    if mouth.engine() == "piper":
+        # Load (the first time, download) the new voice now, not on the first reply.
+        asyncio.get_running_loop().run_in_executor(None, _warm_voice)
+    return c.name
+
+
+def _warm_voice() -> None:
+    try:
+        mouth._synthesize_piper("Ready.")
+    except Exception as e:  # it will say so again when it speaks
+        print(f"(voice didn't load: {e})")
 
 
 async def send_face_pack() -> None:
@@ -1488,13 +1613,13 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
     # (nearly) all that was said. Anything else goes to the model as usual.
     if is_command(norm, config.TRACK_ON_PHRASES) and not is_command(norm, config.TRACK_OFF_PHRASES):
         await set_tracking(True)
-        print(f"{config.ROBOT_NAME} [happy]: {lines['track_on']}")
+        print(f"{personality.name()} [happy]: {lines['track_on']}")
         await send_to_robot({"type": "emotion", "name": "happy"})
         await say(lines["track_on"])
         return
     if is_command(norm, config.TRACK_OFF_PHRASES):
         await set_tracking(False)
-        print(f"{config.ROBOT_NAME} [neutral]: {lines['track_off']}")
+        print(f"{personality.name()} [neutral]: {lines['track_off']}")
         await send_to_robot({"type": "emotion", "name": "neutral"})
         await say(lines["track_off"])
         return
@@ -1502,7 +1627,7 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
         # "Rocky, sleep": goodnight line, sleepy face, and only "hey Rocky"
         # wakes him. No brain call.
         awake_until = 0.0
-        print(f"{config.ROBOT_NAME} [sleepy]: {lines['sleep']}")
+        print(f"{personality.name()} [sleepy]: {lines['sleep']}")
         await send_to_robot({"type": "emotion", "name": "sleepy"})
         await say(lines["sleep"])
         await set_asleep(True)

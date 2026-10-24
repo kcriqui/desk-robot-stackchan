@@ -5,7 +5,7 @@ Three voices (config.TTS_ENGINE picks; "auto" takes the first available):
     FISH_AUDIO_API_KEY is set. Plain HTTPS POST asking for raw 16 kHz PCM. The response body
     streams, so the first audio arrives ~0.3 s in, long before the sentence
     is finished, and is passed straight on to the speaker.
-  * Piper (config.PIPER_VOICE), a free voice that runs on this computer, when
+  * Piper (config.PIPER_VOICE, or the speaking character's), a free voice that runs on this computer, when
     it's installed (requirements-piper.txt; optional because it's GPL-3.0).
     A sentence takes well under 0.1 s, then Praat (parselmouth) shifts its
     pitch and resamples it to 16 kHz.
@@ -78,7 +78,8 @@ def prepare() -> str:
             _synthesize_piper("Hello.")  # loads the voice and warms it up (the first sentence is ~0.5 s slower)
         except Exception as ex:
             return f"voice: the computer's own (Piper failed to load: {ex})"
-        return f"voice: Piper {config.PIPER_VOICE}"
+        from . import personality
+        return f"voice: Piper {personality.voice()[0]} ({personality.CHARACTER.name})"
     return "voice: the computer's own"
 
 
@@ -284,62 +285,86 @@ def _wav_to_pcm16k(wav_bytes: bytes) -> bytes:
     return (np.clip(samples, -1, 1) * 32767).astype(np.int16).tobytes()
 
 
-_piper = None
-_piper_lock = threading.Lock()  # one synthesis at a time; also guards the first load
+_pipers: dict = {}
+_piper_lock = threading.Lock()  # one synthesis at a time; also guards loading
 
 
-def _piper_voice():
-    """The configured Piper voice, downloaded once (pinned and hash-checked
-    like the turn-taking models) and loaded once."""
-    global _piper
+def _piper_voice(key: str):
+    """A Piper voice from config.PIPER_VOICES, downloaded once (pinned and
+    hash-checked like the turn-taking models) and loaded once."""
     with _piper_lock:
-        if _piper is None:
+        if key not in _pipers:
             from piper import PiperVoice  # optional, GPL-3.0; slow import, keep it lazy
 
             from .turn import _fetch
 
-            key = config.PIPER_VOICE
             lang, name, quality = key.split("-")
-            base = (f"https://huggingface.co/rhasspy/piper-voices/resolve/{config.PIPER_REVISION}/"
-                    f"{lang[:2]}/{lang}/{name}/{quality}/{key}")
+            base = config.PIPER_VOICES[key].get("url") or (
+                f"https://huggingface.co/rhasspy/piper-voices/resolve/{config.PIPER_REVISION}/"
+                f"{lang[:2]}/{lang}/{name}/{quality}/{key}")
             files = {ext: _fetch(base + ext, key + ext, sha) for ext, sha in config.PIPER_VOICES[key]["sha256"].items()}
-            _piper = PiperVoice.load(str(files[".onnx"]), config_path=str(files[".onnx.json"]))
-        return _piper
+            _pipers[key] = PiperVoice.load(str(files[".onnx"]), config_path=str(files[".onnx.json"]))
+        return _pipers[key]
 
 
-def _synthesize_piper(text: str) -> bytes:
-    """Rocky's words from Piper as 16 kHz s16le PCM, with the voice's tuning
-    from config.PIPER_VOICES and a pause after the sentence."""
+def _synthesize_piper(text: str, voice_of=None) -> bytes:
+    """The words from Piper as 16 kHz s16le PCM, in the speaking character's
+    voice and tuning (personality.voice(); config.PIPER_VOICES explains the
+    settings), with a pause after the sentence. The same steps as Piper Lab
+    (.devtools/piper_lab), so a voice tuned there sounds the same here.
+    voice_of: another character's voice instead (the live view's Test voice)."""
     import parselmouth  # optional, GPL-3.0 (Praat)
     from parselmouth.praat import call
     from piper import SynthesisConfig
 
-    voice = _piper_voice()
-    tune = config.PIPER_VOICES[config.PIPER_VOICE]
+    from . import personality
+
+    key, tune = personality.voice(voice_of)
+    voice = _piper_voice(key)
+    shift = 2 ** (float(tune.get("pitch") or 0) / 12)
+    # Pitch by resampling: synthesize slower by `shift`, then play it at the
+    # original rate times `shift` (a smaller voice). keep_size: Praat moves the
+    # pitch below and leaves the size alone.
+    f = shift if tune.get("pitch_mode") == "resample" else 1.0
+    speaker = tune.get("speaker") or None
+    ids = voice.config.speaker_id_map or {}
+    if speaker is not None and speaker not in ids:
+        raise ValueError(f"{key} has no speaker {speaker!r} (it has {', '.join(ids) or 'just one'})")
     syn = SynthesisConfig(
-        length_scale=voice.config.length_scale / tune["speed"],  # speed 1 = the voice's own pace
-        noise_scale=voice.config.noise_scale if tune["noise"] is None else tune["noise"],
-        noise_w_scale=voice.config.noise_w_scale if tune["noise_w"] is None else tune["noise_w"],
+        speaker_id=ids.get(speaker) if speaker else None,
+        length_scale=voice.config.length_scale * f / float(tune.get("speed") or 1.0),  # speed 1 = its own pace
+        noise_scale=voice.config.noise_scale if tune.get("noise") is None else float(tune["noise"]),
+        noise_w_scale=voice.config.noise_w_scale if tune.get("noise_w") is None else float(tune["noise_w"]),
     )
     with _piper_lock:
         chunks = list(voice.synthesize(text, syn_config=syn))
     if not chunks:
         return b""
     rate = chunks[0].sample_rate
-    gap = np.zeros(int(config.PIPER_SENTENCE_PAUSE * rate), dtype=np.float32)
+    pause = float(tune.get("pause", config.PIPER_SENTENCE_PAUSE))
+    gap = np.zeros(int(pause * rate * f), dtype=np.float32)  # scaled by f: the resample brings it back
     parts: list[np.ndarray] = []
     for c in chunks:  # Piper may split the text further; same pause between its pieces
         parts += [c.audio_float_array, gap]
     snd = parselmouth.Sound(np.concatenate(parts).astype(np.float64), rate)
-    if tune["pitch"]:
-        # Praat pitch manipulation: every pitch point times 2^(semitones/12),
-        # resynthesized by overlap-add, so the voice keeps its size and timing.
-        manip = call(snd, "To Manipulation", 0.01, 60, 500)
-        tier = call(manip, "Extract pitch tier")
-        call(tier, "Formula", f"self * {2 ** (tune['pitch'] / 12)}")
-        call([tier, manip], "Replace pitch tier")
-        snd = call(manip, "Get resynthesis (overlap-add)")
-    samples = snd.resample(SAMPLE_RATE, 50).values[0]  # band-limited, unlike _wav_to_pcm16k's
+    intonation = float(tune.get("intonation", 1.0))
+    praat_shift = 1.0 if f != 1.0 else shift
+    if abs(intonation - 1) >= 1e-3 or abs(praat_shift - 1) >= 1e-3:
+        # Praat pitch manipulation, resynthesized by overlap-add (timing and
+        # size kept): the rise and fall scaled around the median pitch by
+        # `intonation` (0 = flat), and every point moved by `praat_shift`.
+        f0 = snd.to_pitch(pitch_floor=60, pitch_ceiling=500).selected_array["frequency"]
+        f0 = f0[f0 > 0]
+        if len(f0):
+            med = float(np.median(f0))
+            manip = call(snd, "To Manipulation", 0.01, 60, 500)
+            tier = call(manip, "Extract pitch tier")
+            call(tier, "Formula", f"{med * praat_shift} * (self / {med}) ^ {intonation}")
+            call([tier, manip], "Replace pitch tier")
+            snd = call(manip, "Get resynthesis (overlap-add)")
+    # Band-limited, unlike _wav_to_pcm16k's. Read as recorded at rate * f, so a
+    # resample pitch shift plays it faster.
+    samples = parselmouth.Sound(snd.values[0], snd.sampling_frequency * f).resample(SAMPLE_RATE, 50).values[0]
     return (np.clip(samples, -1, 1) * 32767).astype(np.int16).tobytes()
 
 
@@ -444,6 +469,17 @@ def stream(text: str, leveler: Leveler | None = None) -> Iterator[bytes]:
     finally:
         if complete and parts and config.DEBUG_SAVE_TTS:
             _save_clip(b"".join(parts), text)
+
+
+def sample_wav(text: str, character) -> bytes:
+    """How a character (personality.Character) sounds saying `text`, as a WAV file for the browser."""
+    if engine() != "piper":
+        raise ValueError("the brain speaks with Fish Audio (TTS_ENGINE), so a character's Piper voice isn't used")
+    pcm = normalize(_synthesize_piper(text, character), 0.9)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(SAMPLE_RATE); w.writeframes(pcm)
+    return buf.getvalue()
 
 
 def synthesize(text: str) -> bytes:
