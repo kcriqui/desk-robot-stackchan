@@ -658,6 +658,7 @@
       ["robot", "body_language", "Body language", "small head moves while it talks and waits", "check"],
       ["robot", "face_pack", "Face pack", "for characters that don't pick their own", "facepack"],
       ["robot", "near_stop", "A hand stops it talking", "held over the sensor right of the camera", "check"],
+      ["robot", "power_bank", "On a USB power bank", "sleeps deeply on USB too; powers off only if the pack runs out and its battery is below half", "check"],
       ["robot", "near_level", "Near means", "", "number"],
     ]],
     ["Clock screen", "while it sleeps on USB", [
@@ -680,8 +681,8 @@
       ["screen", "night_brightness", "Dimmed to", "", "range:1:100"],
     ]],
     ["Light bars", "firmware 0.6.9.5+", [
-      ["leds", "brightness", "Brightness", "0 = off; they glow in its face's colour", "range:0:100"],
-      ["leds", "asleep", "While it sleeps", "", "select:off=off,glow=a faint glow"],
+      ["leds", "brightness", "Brightness", "0 = off", "range:0:100"],
+      ["leds", "asleep", "While it sleeps", "", "select:off=off,glow=a Cylon scanner"],
     ]],
   ];
   let settingsMeta = null;
@@ -823,7 +824,7 @@
     track_off: "Stopping", search: "Before a web search", dance: "Before dancing", timer: "A timer is done (with what it's for)",
     timer_plain: "A timer is done", battery_low: "Battery low", battery_very_low: "Battery very low", battery_critical: "Battery critical",
     battery_saved: "Plugged in again", power_off_idle: "Powering off after a long quiet", power_off_idle_timers: "…with a timer still set",
-    power_off_battery: "Powering off, battery empty", hot: "Running hot", very_hot: "Too hot" };
+    power_off_battery: "Powering off, battery empty", power_off_bank: "Powering off, power pack empty", hot: "Running hot", very_hot: "Too hot" };
   const VKEYS = ["pitch", "pitch_mode", "intonation", "speed", "noise", "noise_w", "pause", "speaker"];
   function showSpeakers(want) {   // a voice with several speakers (config.py "speakers") picks one
     const list = cstate.meta.speakers?.[$("c-voice").value] || [], sel = $("c-v-speaker");

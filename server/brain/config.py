@@ -316,6 +316,11 @@ BATTERY_WARNINGS = [
 IDLE_POWER_OFF_MINUTES = 30
 POWER_OFF_TIMER_MIN_PERCENT = 20
 POWER_OFF_CRITICAL_PERCENT = 5
+# On a USB power bank (a setting): the robot sleeps deeper on USB too, and never powers off for a long quiet.
+# If the pack runs out (it's on its battery again) and the battery falls below POWER_BANK_OFF_PERCENT while it's
+# asleep, it says goodbye and powers off. (Firmware 0.6.9.18+ for the deep sleep.)
+POWER_BANK = False
+POWER_BANK_OFF_PERCENT = 50
 # Chip temperature: he warns once above TEMP_WARN_C, and again (every 10 min)
 # from 5 degrees hotter. It resets once he's cooled 5 degrees below it.
 TEMP_WARN_C = 70.0
@@ -459,7 +464,7 @@ NEAR_LEVEL = 60
 IDLE_SCREEN = "clock"
 # The light bars on its body (firmware 0.6.9.5+, leds.h): body language in the face's colour (breathing while it
 # listens, a sweep while it thinks, a level meter while it talks, a rainbow when it dances, flashes for alerts).
-# LED_BRIGHTNESS percent, 0 = off; asleep they're off or a faint glow.
+# LED_BRIGHTNESS percent, 0 = off; asleep they're off or a Cylon scanner ("glow", its old name).
 LED_BRIGHTNESS = 30
 LED_ASLEEP = "off"         # off | glow
 

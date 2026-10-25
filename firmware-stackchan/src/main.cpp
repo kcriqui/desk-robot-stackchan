@@ -141,7 +141,8 @@ struct ScreenSettings {
   uint8_t near = 1;           // a hand at the sensor stops it mid-reply
   uint16_t nearLevel = 60;    // proximity reading (0-2047) that counts as near (nothing near: 0-5)
   uint8_t led = 30;           // the light bars' brightness, percent; 0 = off
-  uint8_t ledSleep = 0;       // asleep: 0 off, 1 a faint glow
+  uint8_t ledSleep = 0;       // asleep: 0 off, 1 a scanner
+  uint8_t powerBank = 0;      // on a USB power bank: deep sleep on USB too (the brain's robot.power_bank)
 } screenCfg;
 LightSensor light;
 Leds leds;
@@ -196,6 +197,7 @@ void loadScreen() {
   screenCfg.nearLevel = p.getUShort("nearLvl", screenCfg.nearLevel);
   screenCfg.led = p.getUChar("led", screenCfg.led);
   screenCfg.ledSleep = p.getUChar("ledSleep", screenCfg.ledSleep);
+  screenCfg.powerBank = p.getUChar("bank", screenCfg.powerBank);
   p.end();
 }
 
@@ -212,6 +214,7 @@ void saveScreen() {
   p.putUShort("nearLvl", screenCfg.nearLevel);
   p.putUChar("led", screenCfg.led);
   p.putUChar("ledSleep", screenCfg.ledSleep);
+  p.putUChar("bank", screenCfg.powerBank);
   p.end();
 }
 
@@ -281,10 +284,10 @@ void printScreen() {
   static const char* kNight[] = {"off", "dim", "dark"};
   static const char* kIdle[] = {"clock", "pong", "tetris", "frogger", "roam", "life"};
   Serial.printf("screen: face %u%% (0 = default), clock %u%% (0 = as awake), night %s below %u lux at %u%% "
-                "(room %s), idle %s, wake when near %s (at %u)\n", screenCfg.face, screenCfg.clock,
+                "(room %s), idle %s, wake when near %s (at %u), power bank %s\n", screenCfg.face, screenCfg.clock,
                 kNight[min(screenCfg.night, (uint8_t)2)], screenCfg.darkLux, screenCfg.nightPct,
                 roomDark ? "dark" : "light", kIdle[min(screenCfg.idle, (uint8_t)5)], screenCfg.near ? "on" : "off",
-                screenCfg.nearLevel);
+                screenCfg.nearLevel, screenCfg.powerBank ? "yes" : "no");
   light.printStatus();
 }
 
@@ -293,7 +296,8 @@ void printScreen() {
 // word keeps listening. Powering off is the brain's call (it knows about
 // reminders, and says goodbye); the robot only does it itself when the brain
 // is gone or the battery is all but flat. Only the power button (and maybe
-// plugging in USB) turns him back on: the CoreS3's clock can't.
+// plugging in USB) turns him back on: the CoreS3's clock can't. On a USB power bank (a setting) it also
+// sleeps deeper on USB, to make the pack last.
 float batteryVolts = 0, batteryMa = 0;  // the body's INA226, read every 10 s
 uint32_t nextBatteryMs = 0;
 uint32_t asleepSinceMs = 0;   // when his eyes shut; 0 while awake
@@ -565,10 +569,12 @@ void handleCommand(String line) {
     clockScreen.printStatus();
   } else if (cmd == "screen") {
     // "screen <face %> <clock %> <night 0|1|2> <dark below lux> <night %> <idle 0-5> <near 0|1> <near level>"
-    // ... [<light bars %> <light bars asleep 0|1>] (0.6.9.5+)
-    int f, c, n, lx, np, idle, nr, nl, led = screenCfg.led, ledSleep = screenCfg.ledSleep;
-    if (sscanf(arg.c_str(), "%d %d %d %d %d %d %d %d %d %d", &f, &c, &n, &lx, &np, &idle, &nr, &nl, &led,
-               &ledSleep) >= 8) {
+    // ... [<light bars %> <light bars asleep 0|1>] (0.6.9.5+) [<on a power bank 0|1>] (0.6.9.18+)
+    int f, c, n, lx, np, idle, nr, nl, led = screenCfg.led, ledSleep = screenCfg.ledSleep,
+        bank = screenCfg.powerBank;
+    if (sscanf(arg.c_str(), "%d %d %d %d %d %d %d %d %d %d %d", &f, &c, &n, &lx, &np, &idle, &nr, &nl, &led,
+               &ledSleep, &bank) >= 8) {
+      screenCfg.powerBank = bank ? 1 : 0;
       screenCfg.led = constrain(led, 0, 100);
       screenCfg.ledSleep = ledSleep ? 1 : 0;
       leds.setBrightness(screenCfg.led);
@@ -666,7 +672,7 @@ void updatePower(uint32_t now) {
       powerOff("battery");  // the brain says goodbye first if it can; this is the backstop
     }
   }
-  if (!onBattery()) {
+  if (!onBattery() && !screenCfg.powerBank) {
     setDeepSleep(false);  // plugged in: back to normal
   } else if (face.asleep() && asleepSinceMs && msSince(now, asleepSinceMs) >= DEEP_SLEEP_AFTER_MS) {
     setDeepSleep(true);
@@ -737,7 +743,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.11 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.18 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN

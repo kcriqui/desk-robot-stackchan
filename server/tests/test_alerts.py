@@ -3,6 +3,7 @@ phrases count as commands."""
 
 import time
 import unittest
+import unittest.mock
 
 from brain import alerts, config, personality
 from brain.battery import Reading
@@ -119,6 +120,25 @@ class PowerOffWatchTests(unittest.TestCase):
         r = on_battery(3.40, 0)
         for t in (0, 100, 200, 300):
             self.assertIsNone(w.check(r, False, False, t))
+
+    def test_on_a_power_bank_only_when_the_pack_is_gone_and_the_battery_below_half(self):
+        half = on_battery(3.72, 0).percent
+        self.assertLess(half, config.POWER_BANK_OFF_PERCENT)   # the reading used below
+        with unittest.mock.patch.object(config, "POWER_BANK", True):
+            w = alerts.PowerOffWatch()
+            key, _ = self.run_until(w, 3.90, True, False, 0, self.IDLE + 600)   # ~70%, asleep: no idle power-off
+            self.assertIsNone(key)
+            w = alerts.PowerOffWatch()
+            for t in range(0, self.IDLE, 10):   # the pack is still going: USB
+                self.assertIsNone(w.check(Reading(3.72, -300, t), True, False, t))
+            w = alerts.PowerOffWatch()
+            key, _ = self.run_until(w, 3.72, False, False, 0, 600)   # pack gone, below half, but awake
+            self.assertIsNone(key)
+            key, at = self.run_until(w, 3.72, True, True, 610, 700)  # ...then asleep: off, timers or not
+            self.assertEqual((key, at), ("power_off_bank", 610))
+            w = alerts.PowerOffWatch()
+            key, _ = self.run_until(w, 3.49, False, True, 0, 100)   # nearly flat: off at once, as ever
+            self.assertEqual(key, "power_off_battery")
 
 
 class TimerTests(unittest.TestCase):

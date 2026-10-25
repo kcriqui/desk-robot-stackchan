@@ -5,10 +5,10 @@
 // The two light bars along the body's sides: 12 WS2812C LEDs (0-5 on its right, 6-11 on its left; config.h), driven
 // through the body's IO expander over I2C. They're part of the robot's body language, drawn here about 40 times a
 // second from what the robot already knows:
-//   awake and listening   a slow fade from black to white and back (5 s)
+//   awake and listening   each LED drifting slowly through colours of its own
 //   thinking              a light sweeping front to back along both bars
 //   talking               both bars fill from the back with the loudness of its voice
-//   asleep                off, or a faint slow green breath (a setting)
+//   asleep                off, or a slow Cylon scanner, its colour shifting a little each sweep (a setting)
 //   dancing               simple patterns, 150 ms a step: a running light, alternating, filling; moves change the colour
 //   alerts                a timer flashes them, low battery pulses amber, heat pulses red, a hush dips them
 // Off in deep sleep. The brain sets the brightness and the asleep look (the `screen` message), starts and ends
@@ -19,7 +19,7 @@ class Leds {
   enum class Alert : uint8_t { None, Timer, Battery, Hot, Hush };
 
   void setBrightness(uint8_t pct) { brightness_ = min<uint8_t>(pct, 100); }  // 0 = off
-  void setAsleepGlow(bool on) { asleepGlow_ = on; }
+  void setAsleepGlow(bool on) { asleepGlow_ = on; }  // the scanner (the setting's old name: glow)
   void alert(Alert a, uint32_t nowMs);
   void setDance(bool on, uint32_t nowMs);
   bool dancing() const { return dance_; }
@@ -43,6 +43,10 @@ class Leds {
   uint32_t danceAt_ = 0, danceStep_ = 0;
   uint8_t colour_ = 0, shownColour_ = 0;  // the dance's colour: the next one, and the step's
   uint32_t testAt_ = 0;
+  float driftFrom_[12] = {}, driftTo_[12] = {};  // the drift's hues (0..1, may run past either end)
+  uint32_t driftAt_[12] = {}, driftMs_[12] = {};
+  float cylon_[6] = {}, cylonHue_ = 0;  // the scanner: each position's light, and its colour
+  uint32_t cylonRound_ = UINT32_MAX;
   float meter_ = 0;                  // the voice meter, eased (fast up, slower down)
   uint32_t nextMs_ = 0;
   uint16_t shown_[12] = {};         // RGB565, as last sent

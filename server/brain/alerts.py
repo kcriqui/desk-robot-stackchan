@@ -59,9 +59,11 @@ class PowerOffWatch:
     """When to power the robot off, on battery only: after
     config.IDLE_POWER_OFF_MINUTES asleep, unless a timer is set and the
     battery is still at config.POWER_OFF_TIMER_MIN_PERCENT or more; and at
-    config.POWER_OFF_CRITICAL_PERCENT, timers or not. The battery level is
-    the median of the last three readings, as in BatteryWatch. Returns the
-    goodbye line's key, or None."""
+    config.POWER_OFF_CRITICAL_PERCENT, timers or not. On a power bank
+    (config.POWER_BANK) there's no idle power-off: only, once the pack has run
+    out, asleep below config.POWER_BANK_OFF_PERCENT. The battery level is the
+    median of the last three readings, as in BatteryWatch. Returns the goodbye
+    line's key, or None."""
 
     def __init__(self) -> None:
         self.recent: deque[int] = deque(maxlen=3)
@@ -84,6 +86,8 @@ class PowerOffWatch:
         p = sorted(self.recent)[1]
         if p <= config.POWER_OFF_CRITICAL_PERCENT:
             return "power_off_battery"
+        if config.POWER_BANK:
+            return "power_off_bank" if self.asleep_since is not None and p < config.POWER_BANK_OFF_PERCENT else None
         if self.asleep_since is None or now - self.asleep_since < config.IDLE_POWER_OFF_MINUTES * 60:
             return None
         if not timers_set:

@@ -84,7 +84,8 @@ settle. The server takes either type.
                                   // near_level or more, 0-2047) stops it talking. Kept in flash. Sent on connect.
                                   // (0.6.3-0.6.6 took n0 / n1, a night from / until in minutes.)
                                   // 0.6.9.5+ also "led" (the light bars' brightness, percent, 0 = off) and
-                                  // "led_sleep" (asleep: 0 off, 1 a faint glow)
+                                  // "led_sleep" (asleep: 0 off, 1 a scanner); 0.6.9.18+ "bank" (true: on a USB
+                                  // power bank, so it sleeps deeper on USB too)
 {"type": "leds", "alert": "timer"}  // firmware-stackchan 0.6.9.5+: the light bars: "alert" timer | battery |
                                   // hot | hush (a flash or pulses), or "dance": true | false (a rainbow that
                                   // jumps on each head move until false, or 60 s), or "test": true (one LED

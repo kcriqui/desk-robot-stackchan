@@ -7,6 +7,8 @@
 namespace {
 
 constexpr uint32_t FRAME_MS = 25;
+constexpr uint32_t DRIFT_FRAME_MS = 50;
+constexpr uint32_t CYLON_STEP_MS = 400;  // the scanner's light moves one LED this often: a sweep, up and back, in 4 s
 constexpr uint32_t DANCE_TIMEOUT_MS = 60000;  // a dance whose end never came
 constexpr uint32_t DANCE_STEP_MS = 150;       // each dance pattern holds this long: long enough to see
 // Full colours only: anything mixed shifts in RGB565's few steps.
@@ -48,7 +50,7 @@ void Leds::beat(uint32_t) { colour_ = (colour_ + 1) % 6; }
 void Leds::test(uint32_t nowMs) { testAt_ = nowMs | 1; }
 
 void Leds::printStatus() const {
-  Serial.printf("leds: brightness %u%%, asleep %s, %s\n", brightness_, asleepGlow_ ? "a faint glow" : "off",
+  Serial.printf("leds: brightness %u%%, asleep %s, %s\n", brightness_, asleepGlow_ ? "a scanner" : "off",
                 dance_ ? "dancing" : alert_ != Alert::None ? "an alert" : "body language");
 }
 
@@ -59,8 +61,7 @@ void Leds::update(uint32_t nowMs, uint32_t eye, bool asleep, bool deepSleep, boo
   const float t = nowMs / 1000.0f;
   float base[3] = {((eye >> 16) & 0xFF) / 255.0f, ((eye >> 8) & 0xFF) / 255.0f, (eye & 0xFF) / 255.0f};
   float out[12][3] = {};
-  float glow = 0;
-  float white = -1;  // awake: 0..1 of the black-to-white fade (drawn after the brightness, below)
+  bool drift = false;  // awake: each LED drifting through colours (drawn after the brightness, below)
   auto fill = [&](const float c[3], float k) {
     for (int i = 0; i < 12; ++i)
       for (int j = 0; j < 3; ++j) out[i][j] = c[j] * k;
@@ -127,11 +128,26 @@ void Leds::update(uint32_t nowMs, uint32_t eye, bool asleep, bool deepSleep, boo
         k = 0.06f + 0.94f * k * k;
         for (int j = 0; j < 3; ++j) out[ledIndex(side, p)][j] = base[j] * k;
       }
-  } else if (asleep) {  // off, or a faint slow breath (set after the brightness below: it's dim at any setting)
-    if (asleepGlow_) glow = (5 + 11 * (0.5f - 0.5f * cosf(t / 8.0f * TWO_PI_F))) / 63.0f;  // green steps 5-16
-  } else {  // awake, listening: a slow fade from black to white and back
-    float f = 0.5f - 0.5f * cosf(t / 5.0f * TWO_PI_F);
-    white = f * f;  // lingers in the dark, where each step shows most
+  } else if (asleep) {  // off, or a Cylon scanner: a light sweeping front to back and back, trailing off
+    if (asleepGlow_) {
+      uint32_t n = nowMs / CYLON_STEP_MS;
+      int at = n % 10, pos = at < PER_BAR ? at : 10 - at;  // 0..5..1, both sides together
+      uint32_t sweep = n / 10;  // a sweep, up and back, is 10 steps
+      if (sweep != cylonRound_) {  // each sweep shifts the colour a little (it starts at a random one)
+        cylonHue_ = cylonRound_ == UINT32_MAX ? (esp_random() % 1000) / 1000.0f : cylonHue_ + 0.01f;
+        cylonRound_ = sweep;
+      }
+      // One LED, no tail: the diffuser spread any tail both ways.
+      for (int p = 0; p < PER_BAR; ++p) cylon_[p] = p == pos ? 1.0f : 0.0f;
+      float c[3];
+      hueToRgb(cylonHue_, c);
+      for (int side = 0; side < 2; ++side)
+        for (int p = 0; p < PER_BAR; ++p)
+          for (int j = 0; j < 3; ++j) out[ledIndex(side, p)][j] = c[j] * cylon_[p];
+    }
+  } else {  // awake, listening: every LED drifting slowly through colours of its own
+    drift = true;
+    nextMs_ = nowMs + DRIFT_FRAME_MS;  // slow changes: fewer frames, less I2C
   }
   if (!speaking) meter_ *= 0.8f;
 
@@ -142,20 +158,24 @@ void Leds::update(uint32_t nowMs, uint32_t eye, bool asleep, bool deepSleep, boo
       float v = constrain(out[i][j], 0.0f, 1.0f);
       out[i][j] = v * v * scale;
     }
-  // The asleep glow: one colour (green: it has the most steps), the same whatever the brightness, not squared
-  // (squared and scaled it rounded to nothing). Slow, so its steps (one green level each) go by gently.
-  if (glow > 0) {
-    const float green[3] = {0, 1, 0};
-    fill(green, glow);
-  }
-  // The fade to white, in RGB565's steps: all 12 together, up to 31 levels; green moves two of its 64 for each
-  // of red's and blue's 32, so the white stays white. (Taking the levels one LED at a time was smoother overall,
-  // but the LEDs visibly disagreed at the dark end.)
-  if (white >= 0) {
-    int lvl = lroundf(white * lroundf(brightness_ / 100.0f * 31));
+  // The drift: each LED eases from its colour to a random new one over 4-10 s, then picks another. Full colours
+  // at the brightness, not squared: hue is what RGB565 does smoothly (one channel ramps at a time).
+  if (drift) {
     for (int i = 0; i < 12; ++i) {
-      out[i][0] = out[i][2] = lvl / 31.0f;
-      out[i][1] = 2 * lvl / 63.0f;
+      uint32_t el = since(nowMs, driftAt_[i]);
+      if (!driftMs_[i] || el >= driftMs_[i]) {  // arrived (or the first time): a new colour to head for
+        driftFrom_[i] = driftMs_[i] ? driftTo_[i] : (esp_random() % 1000) / 1000.0f;
+        float step = 0.15f + (esp_random() % 1000) / 1000.0f * 0.35f;  // 0.15-0.5 of the way round, either way
+        driftTo_[i] = driftFrom_[i] + (esp_random() & 1 ? step : -step);
+        driftAt_[i] = nowMs;
+        driftMs_[i] = 4000 + esp_random() % 6000;
+        el = 0;
+      }
+      float f = static_cast<float>(el) / driftMs_[i];
+      f = f * f * (3 - 2 * f);  // eases in and out
+      float c[3];
+      hueToRgb(driftFrom_[i] + (driftTo_[i] - driftFrom_[i]) * f, c);
+      for (int j = 0; j < 3; ++j) out[i][j] = c[j] * scale;
     }
   }
   show(out);
@@ -175,8 +195,9 @@ void Leds::show(const float rgb[12][3]) {
     same &= px[i] == shown_[i];
   }
   if (same) return;  // nothing changed: no I2C traffic
-  for (int i = 0; i < 12; ++i)  // the library keeps the top bits: send each step at the bottom of its range
-    M5StackChan.setRgbColor(i, (px[i] >> 11) << 3, ((px[i] >> 5) & 0x3F) << 2, (px[i] & 0x1F) << 3);
+  for (int i = 0; i < 12; ++i)  // only the LEDs that changed (each is an I2C write, ~0.4 ms at 100 kHz)
+    if (!shownValid_ || px[i] != shown_[i])  // the library keeps the top bits: send each step's bottom value
+      M5StackChan.setRgbColor(i, (px[i] >> 11) << 3, ((px[i] >> 5) & 0x3F) << 2, (px[i] & 0x1F) << 3);
   M5StackChan.refreshRgb();
   memcpy(shown_, px, sizeof px);
   shownValid_ = true;

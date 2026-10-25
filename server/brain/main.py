@@ -1574,7 +1574,7 @@ async def change_setting(section: str, key: str, value) -> dict:
         await send_face_pack()
     elif section == "clock" or section == "weather":
         asyncio.create_task(send_clock())  # the time zone and style, then the weather (fetched)
-    elif section in ("screen", "leds") or key in ("near_stop", "near_level"):
+    elif section in ("screen", "leds") or key in ("near_stop", "near_level", "power_bank"):
         await send_screen()
     elif section == "listening" and ears is not None:
         ears.apply_config()
@@ -1590,7 +1590,8 @@ async def send_screen() -> None:
                          "dark_lux": config.DARK_LUX, "near": config.NEAR_STOP, "near_level": config.NEAR_LEVEL,
                          "night_pct": config.NIGHT_BRIGHTNESS,
                          "idle": ("clock", "pong", "tetris", "frogger", "roam", "life").index(config.IDLE_SCREEN),
-                         "led": config.LED_BRIGHTNESS, "led_sleep": ("off", "glow").index(config.LED_ASLEEP)})
+                         "led": config.LED_BRIGHTNESS, "led_sleep": ("off", "glow").index(config.LED_ASLEEP),
+                         "bank": config.POWER_BANK})
 
 
 async def send_face_pack() -> None:
@@ -1630,7 +1631,7 @@ async def power_off(key: str) -> None:
     turns it back on."""
     global powering_off, powered_off, awake_until
     powering_off = True
-    why = "battery" if key == "power_off_battery" else "idle"
+    why = {"power_off_battery": "battery", "power_off_bank": "power bank"}.get(key, "idle")
     await announce(key, "sleepy")  # waits for any conversation, and for the words to finish playing
     print(f"(powering the robot off: {why})")
     await send_to_robot({"type": "power_off", "why": why})
