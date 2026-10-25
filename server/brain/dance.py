@@ -142,6 +142,13 @@ class Dancer:
             await asyncio.sleep(0.1)
         if self.before is not None:
             await self.before()
+        await self.send({"type": "leds", "dance": True})  # the light bars: a rainbow that jumps on each move
+        try:
+            await self._dance(name, loop)
+        finally:
+            await self.send({"type": "leds", "dance": False})
+
+    async def _dance(self, name: str, loop) -> None:
         bpm, moves = DANCES[name]
         beat = 60.0 / bpm / self.tempo
         last: list[float | None] = [None, None]

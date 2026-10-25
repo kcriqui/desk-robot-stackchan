@@ -679,6 +679,10 @@
       ["screen", "dark_lux", "Dark below", "lux", "number"],
       ["screen", "night_brightness", "Dimmed to", "", "range:1:100"],
     ]],
+    ["Light bars", "firmware 0.6.9.5+", [
+      ["leds", "brightness", "Brightness", "0 = off; they glow in its face's colour", "range:0:100"],
+      ["leds", "asleep", "While it sleeps", "", "select:off=off,glow=a faint glow"],
+    ]],
   ];
   let settingsMeta = null;
   const setCtl = {};   // "section.key" -> {get, set, reset}

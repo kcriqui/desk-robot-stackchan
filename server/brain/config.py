@@ -457,6 +457,11 @@ NEAR_LEVEL = 60
 # Tetris, Frogger, from V2; Conway's Game of Life), or roam (the sleeping face, the head looking round the room).
 # In the dark a game keeps playing, dimmed with night mode (firmware 0.6.9.3+); roam gives way to the clock.
 IDLE_SCREEN = "clock"
+# The light bars on its body (firmware 0.6.9.5+, leds.h): body language in the face's colour (breathing while it
+# listens, a sweep while it thinks, a level meter while it talks, a rainbow when it dances, flashes for alerts).
+# LED_BRIGHTNESS percent, 0 = off; asleep they're off or a faint glow.
+LED_BRIGHTNESS = 30
+LED_ASLEEP = "off"         # off | glow
 
 # Facts he keeps for good (the remember / forget tools; memories.py). The
 # server/data folder is git-ignored.

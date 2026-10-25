@@ -101,6 +101,9 @@ constexpr bool CLOCK_SCREEN = true;
 constexpr uint32_t SLEEP_FACE_MS = 5000;
 // Its brightness, the face's and night dimming come from the brain (its Settings tab, the `screen` message).
 
+// The light bars (leds.h) run front to back along the body's sides: LEDs 0-5 on the robot's right, front to back,
+// then 6-11 on its left, back to front (checked with `leds test`, 2026-10-24).
+
 
 // ─── Behavior ────────────────────────────────────────────────────────────────
 constexpr uint32_t FRAME_INTERVAL_MS = 33;  // ~30 FPS face animation

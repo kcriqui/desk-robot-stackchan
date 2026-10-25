@@ -47,6 +47,10 @@ SCHEMA: dict[str, dict[str, tuple]] = {
         "night_brightness": ("NIGHT_BRIGHTNESS", "int", (1, 100)),
         "idle_screen":   ("IDLE_SCREEN", "choice", ("clock", "pong", "tetris", "frogger", "roam", "life")),
     },
+    "leds": {
+        "brightness":    ("LED_BRIGHTNESS", "int", (0, 100)),
+        "asleep":        ("LED_ASLEEP", "choice", ("off", "glow")),
+    },
     "listening": {
         "VAD_THRESHOLD":    ("VAD_THRESHOLD", "float", (0.1, 0.95)),
         "TURN_THRESHOLD":   ("TURN_THRESHOLD", "float", (0.1, 0.95)),

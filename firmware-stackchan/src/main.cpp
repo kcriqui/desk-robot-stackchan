@@ -15,6 +15,7 @@
 #include "face.h"
 #include "face_gfx.h"
 #include "idle_games.h"
+#include "leds.h"
 #include "light.h"
 #include "link.h"
 #include "mic.h"
@@ -139,8 +140,11 @@ struct ScreenSettings {
   uint8_t idle = 0;           // IdleMode: 0 clock, 1 pong, 2 tetris, 3 frogger, 4 roam, 5 life
   uint8_t near = 1;           // a hand at the sensor stops it mid-reply
   uint16_t nearLevel = 60;    // proximity reading (0-2047) that counts as near (nothing near: 0-5)
+  uint8_t led = 30;           // the light bars' brightness, percent; 0 = off
+  uint8_t ledSleep = 0;       // asleep: 0 off, 1 a faint glow
 } screenCfg;
 LightSensor light;
+Leds leds;
 bool roomDark = false;
 uint32_t darkSinceMs = 0, lightSinceMs = 0;
 
@@ -190,6 +194,8 @@ void loadScreen() {
   screenCfg.idle = p.getUChar("idle", screenCfg.idle);
   screenCfg.near = p.getUChar("near", screenCfg.near);
   screenCfg.nearLevel = p.getUShort("nearLvl", screenCfg.nearLevel);
+  screenCfg.led = p.getUChar("led", screenCfg.led);
+  screenCfg.ledSleep = p.getUChar("ledSleep", screenCfg.ledSleep);
   p.end();
 }
 
@@ -204,6 +210,8 @@ void saveScreen() {
   p.putUChar("idle", screenCfg.idle);
   p.putUChar("near", screenCfg.near);
   p.putUShort("nearLvl", screenCfg.nearLevel);
+  p.putUChar("led", screenCfg.led);
+  p.putUChar("ledSleep", screenCfg.ledSleep);
   p.end();
 }
 
@@ -316,6 +324,8 @@ void setDeepSleep(bool on) {
 // Shows why, waits for any speech to finish, and cuts the power.
 void powerOff(const String& why) {
   Serial.printf("power: off (%s)\n", why.c_str());
+  leds.setBrightness(0);  // dark before the power goes (they'd keep their last colour)
+  M5StackChan.showRgbColor(0, 0, 0);
   setDeepSleep(false);
   for (int i = 0; i < 100 && speaker.speaking(); ++i) delay(100);  // the goodbye, if still playing
   M5.Display.setBrightness(max(awakeBrightness, (uint8_t)64));
@@ -386,6 +396,7 @@ void printHelp() {
   Serial.println(F("  clock [tz [12|24]]  the clock screen's time zone (POSIX rule), or its status"));
   Serial.println(F("  weather <temp> <hi> <lo> <code> <day 0|1> <F|C> <words>  the clock screen's weather"));
   Serial.println(F("  light        the light sensor: lux and proximity"));
+  Serial.println(F("  leds test    the light bars one LED at a time, 0 to 11 (also: dance on|off, alert ...)"));
   Serial.println(F("  screen [...] brightness, night, idle screen and hand-to-stop settings (from the brain)"));
   Serial.println(F("  help         this text"));
 }
@@ -412,9 +423,11 @@ void handleCommand(String line) {
                        "skeptical excited love confused"));
     }
   } else if (cmd == "pan") {
+    if (leds.dancing()) leds.beat(millis());
     panNeck.setTarget(arg.toFloat());
     Serial.printf("pan -> %.0f deg\n", panNeck.target());
   } else if (cmd == "tilt") {
+    if (leds.dancing()) leds.beat(millis());
     tiltNeck.setTarget(arg.toFloat());
     Serial.printf("tilt -> %.0f deg\n", tiltNeck.target());
   } else if (cmd == "raw") {
@@ -552,8 +565,14 @@ void handleCommand(String line) {
     clockScreen.printStatus();
   } else if (cmd == "screen") {
     // "screen <face %> <clock %> <night 0|1|2> <dark below lux> <night %> <idle 0-5> <near 0|1> <near level>"
-    int f, c, n, lx, np, idle, nr, nl;
-    if (sscanf(arg.c_str(), "%d %d %d %d %d %d %d %d", &f, &c, &n, &lx, &np, &idle, &nr, &nl) == 8) {
+    // ... [<light bars %> <light bars asleep 0|1>] (0.6.9.5+)
+    int f, c, n, lx, np, idle, nr, nl, led = screenCfg.led, ledSleep = screenCfg.ledSleep;
+    if (sscanf(arg.c_str(), "%d %d %d %d %d %d %d %d %d %d", &f, &c, &n, &lx, &np, &idle, &nr, &nl, &led,
+               &ledSleep) >= 8) {
+      screenCfg.led = constrain(led, 0, 100);
+      screenCfg.ledSleep = ledSleep ? 1 : 0;
+      leds.setBrightness(screenCfg.led);
+      leds.setAsleepGlow(screenCfg.ledSleep);
       screenCfg.face = constrain(f, 0, 100);
       screenCfg.clock = constrain(c, 0, 100);
       screenCfg.night = constrain(n, 0, 2);
@@ -569,6 +588,17 @@ void handleCommand(String line) {
       nextClockBrightMs = 0;
     }
     printScreen();
+  } else if (cmd == "leds") {
+    // leds test | dance on|off | alert timer|battery|hot|hush
+    uint32_t now = millis();
+    if (arg == "test") leds.test(now);
+    else if (arg == "dance on") leds.setDance(true, now);
+    else if (arg == "dance off") leds.setDance(false, now);
+    else if (arg == "alert timer") leds.alert(Leds::Alert::Timer, now);
+    else if (arg == "alert battery") leds.alert(Leds::Alert::Battery, now);
+    else if (arg == "alert hot") leds.alert(Leds::Alert::Hot, now);
+    else if (arg == "alert hush") leds.alert(Leds::Alert::Hush, now);
+    leds.printStatus();
   } else if (cmd == "light") {
     light.printStatus();
   } else if (cmd == "weather") {
@@ -671,6 +701,8 @@ void setup() {
   face.begin();
   defaultBrightness = M5.Display.getBrightness();
   loadScreen();
+  leds.setBrightness(screenCfg.led);
+  leds.setAsleepGlow(screenCfg.ledSleep);
   light.begin();  // before the camera borrows the bus
   awakeBrightness = screenCfg.face ? fromPct(screenCfg.face) : defaultBrightness;
   M5.Display.setBrightness(awakeBrightness);
@@ -705,7 +737,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.4 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.11 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -777,6 +809,8 @@ void loop() {
                   speaker.lastPrebufferMs(), WiFi.RSSI());
   }
   light.update(now);
+  leds.update(now, face.eyeColor(), face.asleep(), deepSleep, face.emotion() == Emotion::Thinking,
+              speaker.speaking(), speaker.level());
   updateDark(now);
   static uint32_t proxSeen = 0;
   static uint8_t nearReads = 0;
@@ -788,6 +822,7 @@ void loop() {
     if (nearReads >= 2 && screenCfg.near && speaker.speaking()) {
       Serial.printf("hush: a hand (proximity %u): stopped talking\n", light.proximity());
       speaker.stop();
+      leds.alert(Leds::Alert::Hush, now);
       brainLink.sendJson("{\"type\":\"hush\"}");
       nearReads = 0;
     }

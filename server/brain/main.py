@@ -354,6 +354,15 @@ async def handle_console_line(line: str) -> bool:
             await set_volume(float(arg))
         except ValueError:
             print("usage: volume <0.0-1.0>")
+    elif cmd == "leds":  # leds test | dance on|off | alert timer|battery|hot|hush: the light bars
+        if arg == "test":
+            await send_to_robot({"type": "leds", "test": True})
+        elif arg.startswith("dance"):
+            await send_to_robot({"type": "leds", "dance": arg.endswith("on")})
+        elif arg.startswith("alert "):
+            await send_to_robot({"type": "leds", "alert": arg.split()[1]})
+        else:
+            print("leds test | dance on|off | alert timer|battery|hot|hush")
     elif cmd == "character":
         if arg:
             try:
@@ -391,7 +400,7 @@ async def handle_console_line(line: str) -> bool:
     elif cmd == "forget":
         print(forget({"about": arg})[0] if arg else "usage: forget <words | #number | all>")
     else:
-        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | character [id] | face [pack] | dance [name] | gesture <emotion> | memories | remember <fact> | forget <words|#|all> | poweroff | status | quit")
+        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | character [id] | face [pack] | dance [name] | leds test | gesture <emotion> | memories | remember <fact> | forget <words|#|all> | poweroff | status | quit")
     return True
 
 
@@ -1478,6 +1487,9 @@ async def announce(key: str, emotion: str, **values) -> None:
         if robot_asleep:
             await set_asleep(False)
         await send_to_robot({"type": "emotion", "name": emotion})
+        flash = _ALERT_LEDS.get(key)
+        if flash and robot_fw >= (0, 6, 9, 5):
+            await send_to_robot({"type": "leds", "alert": flash})
         await say(text)
         eyes.last_said = text
         said_unasked.append((time.time(), text))
@@ -1490,6 +1502,9 @@ _ALERT_EMOTIONS = {
     "battery_low": "thinking", "battery_very_low": "sad", "battery_critical": "surprised",
     "battery_saved": "happy", "hot": "thinking", "very_hot": "sad",
 }
+# ...and how the light bars flash for it (leds.h).
+_ALERT_LEDS = {"timer": "timer", "timer_plain": "timer", "battery_low": "battery", "battery_very_low": "battery",
+               "battery_critical": "battery", "hot": "hot", "very_hot": "hot"}
 
 
 async def send_clock() -> None:
@@ -1559,7 +1574,7 @@ async def change_setting(section: str, key: str, value) -> dict:
         await send_face_pack()
     elif section == "clock" or section == "weather":
         asyncio.create_task(send_clock())  # the time zone and style, then the weather (fetched)
-    elif section == "screen" or key in ("near_stop", "near_level"):
+    elif section in ("screen", "leds") or key in ("near_stop", "near_level"):
         await send_screen()
     elif section == "listening" and ears is not None:
         ears.apply_config()
@@ -1574,7 +1589,8 @@ async def send_screen() -> None:
                          "night": ("off", "dim", "dark").index(config.NIGHT_MODE),
                          "dark_lux": config.DARK_LUX, "near": config.NEAR_STOP, "near_level": config.NEAR_LEVEL,
                          "night_pct": config.NIGHT_BRIGHTNESS,
-                         "idle": ("clock", "pong", "tetris", "frogger", "roam", "life").index(config.IDLE_SCREEN)})
+                         "idle": ("clock", "pong", "tetris", "frogger", "roam", "life").index(config.IDLE_SCREEN),
+                         "led": config.LED_BRIGHTNESS, "led_sleep": ("off", "glow").index(config.LED_ASLEEP)})
 
 
 async def send_face_pack() -> None:

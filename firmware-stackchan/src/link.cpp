@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-static const char* FW_VERSION = "0.6.9.4";
+static const char* FW_VERSION = "0.6.9.11";
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
@@ -189,7 +189,13 @@ void Link::handleMessage(const char* json) {
   } else if (!strcmp(type, "screen")) {
     cmd = String("screen ") + (doc["face"] | 0) + " " + (doc["clock"] | 0) + " " + (doc["night"] | 0) + " " +
           (doc["dark_lux"] | 3) + " " + (doc["night_pct"] | 10) + " " + (doc["idle"] | 0) + " " +
-          ((doc["near"] | true) ? 1 : 0) + " " + (doc["near_level"] | 60);
+          ((doc["near"] | true) ? 1 : 0) + " " + (doc["near_level"] | 60) + " " + (doc["led"] | 30) + " " +
+          (doc["led_sleep"] | 0);
+  } else if (!strcmp(type, "leds")) {
+    // {"test": true} | {"dance": true|false} | {"alert": "timer"|"battery"|"hot"|"hush"}
+    if (doc["test"] | false) cmd = "leds test";
+    else if (!doc["dance"].isNull()) cmd = String("leds dance ") + ((doc["dance"] | false) ? "on" : "off");
+    else cmd = String("leds alert ") + (doc["alert"] | "none");
   } else if (!strcmp(type, "weather") && (doc["none"] | false)) {
     cmd = "weather none";
   } else if (!strcmp(type, "weather")) {

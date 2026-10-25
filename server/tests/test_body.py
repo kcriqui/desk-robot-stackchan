@@ -207,7 +207,9 @@ class DanceTests(unittest.TestCase):
                 self.assertTrue(a <= m["deg"] <= b, (name, m))
             last = {m["type"]: m["deg"] for m in moves}
             self.assertEqual((last["pan"], last["tilt"]), (0.0, config.TILT_REST), name)
-            self.assertEqual(sent[-1], {"type": "emotion", "name": "happy"}, name)
+            self.assertEqual(sent[-2:], [{"type": "emotion", "name": "happy"},
+                                         {"type": "leds", "dance": False}], name)   # pleased, then the lights calm down
+            self.assertIn({"type": "leds", "dance": True}, sent[:3], name)       # the light show starts with it
             self.assertEqual(tracker.noted, (0.0, config.TILT_REST))
             # only faces this robot has
             faces = {m["name"] for m in sent if m["type"] == "emotion"}

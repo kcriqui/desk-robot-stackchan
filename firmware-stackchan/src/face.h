@@ -126,6 +126,11 @@ class Face {
 
   // Call every frame: advances animation, then renders.
   void update(uint32_t nowMs);
+  // The eyes' colour right now (RGB888), easing between emotions: the light bars glow in it.
+  uint32_t eyeColor() const {
+    return (static_cast<uint32_t>(lroundf(colR_)) << 16) | (static_cast<uint32_t>(lroundf(colG_)) << 8) |
+           static_cast<uint32_t>(lroundf(colB_));
+  }
   // Something else drew over the screen: the next frame repaints the plate above and below the band too.
   void redrawBackdrop() { backdropDirty_ = true; }
   // An idle game borrowed the canvas's inks: put the face's back (its pack's included).
