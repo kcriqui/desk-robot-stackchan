@@ -44,7 +44,7 @@ import time
 
 import websockets
 
-from . import alerts, battery, clock, config, faces, kws, logbook, mouth, personality, settings, wakewords, weather, web
+from . import alerts, battery, clock, config, faces, kws, logbook, mouth, personality, settings, touch, wakewords, weather, web
 from .body import Body
 from .dance import Dancer, length as dance_length
 from .memories import Memories
@@ -92,7 +92,7 @@ tracker: Tracker | None = None
 turn_lock = asyncio.Lock()
 camera_boost = 0  # looks in progress, which want full-rate frames
 last_visual_at = 0.0  # when a question last came with a picture, or he last used `look`
-timers = Timers()
+timers = Timers(config.TIMER_FILE)
 body: Body | None = None      # small head moves while he talks (body.py)
 dancer: Dancer | None = None  # his four head dances (dance.py)
 memories = Memories(config.MEMORY_FILE)
@@ -226,16 +226,16 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     if robot_wake_word is None:
         print(f"wake words: the brain listens for {', '.join(repr(e.phrase) for e in wake_table)}"
               f"{' (spotter on)' if spotter is not None and config.KWS_ENABLED else ''}; asleep, the robot streams its mic")
+    global awake_until
     if robot_wake_word:
         print(f"wake word: the robot listens for \"{robot_wake_word}\" itself; asleep, it sends no audio")
-        global awake_until
-        if hello.get("asleep") is False and time.time() >= awake_until:
-            # Awake when this brain (re)started: carry on as after a reply,
-            # rather than shutting his eyes mid-conversation.
-            awake_until = time.time() + config.AWAKE_SECONDS
-            robot_asleep = False
-        elif time.time() >= awake_until:
-            robot_asleep = True  # not in a conversation: let the robot do the listening
+    if hello.get("asleep") is False and time.time() >= awake_until:
+        # Awake when it connects (just switched on, or this brain (re)started): carry on as after a reply, rather
+        # than shutting its eyes at once on a clock left over from before it powered off.
+        awake_until = time.time() + config.AWAKE_SECONDS
+        robot_asleep = False
+    elif robot_wake_word and time.time() >= awake_until:
+        robot_asleep = True  # not in a conversation: let the robot do the listening
     pick_mic_source()
     if config.MIC_SOURCE in ("auto", "robot"):
         await send_to_robot({"type": "mic", "on": True})
@@ -246,7 +246,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     # off) across a brain restart, or come back awake after a reboot.
     await send_to_robot({"type": "asleep", "on": robot_asleep})
     if robot_asleep:
-        asyncio.create_task(_sleep_pose(True))  # head down, as when it fell asleep
+        asyncio.create_task(_sleep_pose(True))  # head to the middle, as when it fell asleep
     asyncio.create_task(send_clock())  # the clock screen's time zone and weather (fetched: don't hold up the link)
     await send_face_pack()
     await send_screen()
@@ -290,6 +290,10 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
                 continue
             if event.get("type") == "wake":  # the robot heard its wake word
                 await on_robot_wake(str(event.get("word") or "?"))
+                continue
+            if event.get("type") == "touch":  # the head's touch strip (firmware 0.6.9.33+)
+                for g in touches.feed(event, time.time()):
+                    asyncio.create_task(on_touch(g, event))
                 continue
             if event.get("type") == "hush":  # a hand over its sensor stopped it talking (firmware 0.6.9.2+)
                 on_robot_hush()
@@ -344,6 +348,10 @@ async def handle_console_line(line: str) -> bool:
             print(f"usage: {cmd} <degrees>")
     elif cmd == "track":
         await set_tracking(arg != "off")
+    elif cmd == "find":
+        asyncio.create_task(find_me())
+    elif cmd == "center":
+        await center_and_relax()
     elif cmd == "ask":
         if not arg:
             print("usage: ask <question>")
@@ -384,7 +392,7 @@ async def handle_console_line(line: str) -> bool:
             except ValueError as e:
                 print(e)
         print(f"character: {personality.CHARACTER.id} (of {', '.join(c.id for c in characters())}; "
-              "CHARACTER in server/.env keeps one)")
+              f"the default, who it starts as: {config.CHARACTER})")
     elif cmd == "face":
         global face_pack
         ids = [p["id"] for p in faces.list_packs() if "error" not in p]
@@ -414,7 +422,7 @@ async def handle_console_line(line: str) -> bool:
     elif cmd == "forget":
         print(forget({"about": arg})[0] if arg else "usage: forget <words | #number | all>")
     else:
-        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | pan <deg> | tilt <deg> | character [id] | face [pack] | dance [name] | leds test | gesture <emotion> | memories | remember <fact> | forget <words|#|all> | poweroff | status | quit")
+        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | find | center | emo <name> | pan <deg> | tilt <deg> | character [id] | face [pack] | dance [name] | leds test | gesture <emotion> | memories | remember <fact> | forget <words|#|all> | poweroff | status | quit")
     return True
 
 
@@ -564,16 +572,10 @@ async def set_asleep(on: bool) -> None:
 
 
 async def _sleep_pose(asleep: bool) -> None:
-    """Falling asleep: head to the middle, then down as far as it goes (it naps). Waking: back up to the middle."""
-    if asleep:
-        await send_to_robot({"type": "pan", "deg": 0})
-        await asyncio.sleep(0.8)
-        if not robot_asleep:
-            return  # woken meanwhile: leave the head up
-        tilt = config.TRACK_TILT_MIN
-    else:
-        await send_to_robot({"type": "pan", "deg": 0})
-        tilt = config.TILT_REST
+    """Falling asleep or waking: the head to the middle, at rest. (The robot itself lowers it all the way going
+    into deep sleep or powering off, before the servos lose power; waking from that brings it back up here.)"""
+    tilt = config.TILT_REST
+    await send_to_robot({"type": "pan", "deg": 0})
     await send_to_robot({"type": "tilt", "deg": tilt})
     if tracker is not None:
         tracker.note_pose(pan=0, tilt=tilt)
@@ -763,6 +765,167 @@ async def set_tracking(on: bool, announce: bool = True) -> tuple[str, bytes | No
     if announce:
         print(f"tracking {'on' if on else 'off'}")
     return ("now following the human's face" if on else "stopped following", None)
+
+
+finding = False  # find_me() is sweeping
+
+touches = touch.Touches()
+# A gesture's line (personality.LINES; "a | b" picks one) and face. Not the double tap or hold: on_touch has those.
+_TOUCH_ANSWERS = {"pat": ("touch_pat", "happy"), "pet": ("touch_pet", "love"),
+                  "scratch": ("touch_scratch", "excited"), "bonk": ("touch_bonk", "angry")}
+leaning = False  # leaning into a stroking hand
+
+
+def _face(name: str) -> str:
+    return name if name in config.EMOTIONS else "happy"
+
+
+def pick(line: str) -> str:
+    """One of a line's choices ("a | b | c"), at random."""
+    import random
+    return random.choice([t.strip() for t in line.split("|") if t.strip()] or [line])
+
+
+async def touch_loop() -> None:
+    """Hands over the gestures that needed a moment to be sure of (a single tap, the end of the strokes)."""
+    while True:
+        await asyncio.sleep(0.1)
+        for g in touches.poll(time.time()):
+            asyncio.create_task(on_touch(g))
+
+
+async def _lean_in() -> None:
+    """Push up into the hand a little for a couple of seconds, eyes happy, then back."""
+    global leaning
+    if leaning or tracker is None or tracker.enabled or head_held or (dancer is not None and dancer.dancing):
+        return
+    leaning = True
+    try:
+        if body is not None:
+            body.stop()
+        rest = tracker.tilt
+        await send_to_robot({"type": "emotion", "name": "happy"})
+        await send_to_robot({"type": "tilt", "deg": min(config.TRACK_TILT_MAX, rest + config.TOUCH_LEAN_DEG)})
+        await asyncio.sleep(2.5)
+        await send_to_robot({"type": "tilt", "deg": rest})
+    finally:
+        leaning = False
+
+
+async def on_touch(g: str, event: dict | None = None) -> None:
+    """Answer a gesture on its head (touch.py), in character. Asleep, only a double tap counts (it wakes, as for
+    its wake word); while it's talking or thinking, touches are let be."""
+    global awake_until
+    if robot_socket is None:
+        return
+    print(f"touch: {g}" + (f" (zones {event.get('zones')}, level {event.get('level')}, {event.get('ms')} ms)"
+                           if event and event.get("g") == "tap" else ""))
+    lines = personality.LINES
+    if robot_asleep:
+        if g != "double":
+            return
+        async with turn_lock:
+            await set_asleep(False)
+            await send_to_robot({"type": "emotion", "name": "surprised"})
+            await send_to_robot({"type": "tilt", "deg": config.TILT_WAKE})
+            if tracker is not None:
+                tracker.note_pose(tilt=config.TILT_WAKE)
+            print(f"{personality.name()} [surprised]: {lines['wake']}")
+            await say(lines["wake"])
+            awake_until = time.time() + config.AWAKE_SECONDS
+        return
+    if turn_lock.locked():
+        return  # talking or thinking: let it finish
+    awake_until = max(awake_until, time.time() + config.AWAKE_SECONDS)  # a touch keeps it up
+    if g == "lean":
+        asyncio.create_task(_lean_in())
+        return
+    if g == "hold":
+        await send_to_robot({"type": "emotion", "name": "sleepy"})  # eyes half shut, content
+        return
+    if g == "release":
+        await send_to_robot({"type": "emotion", "name": "neutral"})
+        return
+    if g == "tuck":
+        async with turn_lock:
+            awake_until = 0.0
+            line = pick(lines["touch_tuck"])
+            print(f"{personality.name()} [sleepy]: {line}")
+            await send_to_robot({"type": "emotion", "name": "sleepy"})
+            await say(line)
+            await set_asleep(True)
+            awake_until = 0.0
+        return
+    if g == "double":
+        key, emotion = "wake", "surprised"
+    else:
+        key, emotion = _TOUCH_ANSWERS[g]
+    emotion = _face(emotion)
+    async with turn_lock:
+        line = pick(lines[key])
+        print(f"{personality.name()} [{emotion}]: {line}")
+        await send_to_robot({"type": "emotion", "name": emotion})
+        await say(line)
+    awake_until = time.time() + config.AWAKE_SECONDS
+
+
+async def center_and_relax() -> None:
+    """Stop following (and any "find me" sweep), let go of a held look, and put the head back in the middle."""
+    if tracker is not None and tracker.enabled:
+        await set_tracking(False)
+    await set_head_held(False)
+    await send_to_robot({"type": "pan", "deg": 0})
+    await send_to_robot({"type": "tilt", "deg": config.TILT_REST})
+    if tracker is not None:
+        tracker.note_pose(pan=0, tilt=config.TILT_REST)
+
+
+async def find_me() -> None:
+    """Look for your face: tracking on, the head sweeps slowly side to side at its rest height, then a little
+    higher, and stops as soon as the tracker sees a face (it then follows it, as after "track me"). Not found: back
+    to the middle, tracking as it was. Stops too if tracking is turned off or it falls asleep meanwhile."""
+    global finding
+    if tracker is None or finding:
+        return
+    finding = True
+    was_enabled = tracker.enabled
+    try:
+        await set_tracking(True, announce=False)
+        start = tracker.pan
+        path = []
+        for i, lift in enumerate(config.FIND_TILTS):
+            ends = (-config.FIND_PAN, config.FIND_PAN) if i % 2 == 0 else (config.FIND_PAN, -config.FIND_PAN)
+            here = start if i == 0 else path[-1][0]
+            for end in ends:
+                n = max(1, round(abs(end - here) / config.FIND_STEP))
+                path += [(here + (end - here) * k / n, config.TILT_REST + lift) for k in range(1, n + 1)]
+                here = end
+        found = False
+        for pan, tilt in path:
+            if tracker.tracking:
+                found = True
+                break
+            if not tracker.enabled or robot_asleep or robot_socket is None:
+                return  # stopped ("stop tracking", asleep, gone): say nothing
+            await send_to_robot({"type": "pan", "deg": round(pan, 1)})
+            await send_to_robot({"type": "tilt", "deg": round(tilt, 1)})
+            tracker.note_pose(pan=pan, tilt=tilt)
+            await asyncio.sleep(config.FIND_STEP_SECONDS)
+        found = found or tracker.tracking
+        if not found:
+            await send_to_robot({"type": "pan", "deg": 0})
+            await send_to_robot({"type": "tilt", "deg": config.TILT_REST})
+            tracker.note_pose(pan=0, tilt=config.TILT_REST)
+            if not was_enabled:
+                await set_tracking(False, announce=False)
+        key, emotion = ("find_found", "happy") if found else ("find_lost", "sad")
+        print(f"find me: {'found a face' if found else 'no face found'}")
+        async with turn_lock:
+            await send_to_robot({"type": "emotion", "name": emotion})
+            print(f"{personality.name()} [{emotion}]: {personality.LINES[key]}")
+            await say(personality.LINES[key])
+    finally:
+        finding = False
 
 
 def _sync(coro_fn):
@@ -1188,11 +1351,7 @@ async def _console_command(action: str, payload: dict) -> dict:
         if tracker is not None:
             tracker.note_pose(pan=pan, tilt=tilt)
     elif action == "center":
-        await set_head_held(False)
-        await send_to_robot({"type": "pan", "deg": 0})
-        await send_to_robot({"type": "tilt", "deg": config.TILT_REST})
-        if tracker is not None:
-            tracker.note_pose(pan=0, tilt=config.TILT_REST)
+        await center_and_relax()
     elif action == "volume":
         await set_volume(_number(payload, "level", 0.0, 1.0))
     elif action == "track":
@@ -1252,9 +1411,9 @@ async def _console_command(action: str, payload: dict) -> dict:
         await use_character(str(payload.get("id", "")))  # a ValueError goes back to the page
     elif action == "characters":  # the Personalities card: every character in full
         return {"characters": [{"id": c.id, "builtin": c.id == personality.ROCKY.id,
-                                "character": personality.to_dict(c),
+                                "edited": personality.edited(c.id), "character": personality.to_dict(c),
                                 "wake_words": personality.wake_words(c)} for c in characters(fresh=True)],
-                "active": personality.CHARACTER.id, "voices": list(config.PIPER_VOICES),
+                "active": personality.CHARACTER.id, "default": config.CHARACTER, "voices": list(config.PIPER_VOICES),
                 "speakers": {k: v["speakers"] for k, v in config.PIPER_VOICES.items() if v.get("speakers")},
                 "default_voice": config.PIPER_VOICE, "face_packs": [p["id"] for p in face_packs()],
                 "default_face": config.FACE_PACK, "lines": personality.DEFAULT_LINES,
@@ -1273,9 +1432,9 @@ async def _console_command(action: str, payload: dict) -> dict:
         cid = str(payload.get("id", ""))
         personality.delete(cid)
         refresh_wake_words()
-        print(f"console: deleted character {cid}")
+        print(f"console: deleted character {cid}" + (" (back to the built-in Rocky)" if cid == "rocky" else ""))
         if cid == personality.CHARACTER.id:
-            await use_character(personality.ROCKY.id)
+            await use_character(cid if cid == personality.ROCKY.id else config.CHARACTER)  # the original / the default
         else:
             personality.refresh()
         return {"name": personality.name()}
@@ -1611,7 +1770,7 @@ _ALERT_EMOTIONS = {
     "battery_saved": "happy", "hot": "thinking", "very_hot": "sad",
 }
 # ...and how the light bars flash for it (leds.h).
-_ALERT_LEDS = {"timer": "timer", "timer_plain": "timer", "battery_low": "battery", "battery_very_low": "battery",
+_ALERT_LEDS = {"timer": "timer", "timer_plain": "timer", "timer_missed": "timer", "timer_missed_plain": "timer", "battery_low": "battery", "battery_very_low": "battery",
                "battery_critical": "battery", "hot": "hot", "very_hot": "hot"}
 
 
@@ -1633,7 +1792,6 @@ async def use_character(char_id: str) -> str:
     face_pack = personality.face_pack()
     await send_face_pack()
     print(f"character: {c.name} (voice {personality.voice()[0]}, face {face_pack})")
-    settings.change("robot", "character", c.id)  # a restart keeps them
     if mouth.engine() == "piper":
         # Load (the first time, download) the new voice now, not on the first reply.
         asyncio.get_running_loop().run_in_executor(None, _warm_voice)
@@ -1654,9 +1812,8 @@ _TUNE_SETTING = {"VAD_THRESHOLD": ("listening", "VAD_THRESHOLD"), "TURN_THRESHOL
 async def change_setting(section: str, key: str, value) -> dict:
     """The Settings tab changed one (value None = back to the default): check it, keep it, and apply it now."""
     global face_pack
-    if (section, key) == ("robot", "character"):
-        await use_character(str(value or "rocky"))  # it keeps the setting itself
-        return {"value": personality.CHARACTER.id}
+    if (section, key) == ("robot", "character") and value is not None:
+        personality.load(str(value))  # the default must exist (a ValueError goes back to the page)
     if (section, key) == ("robot", "volume"):
         await set_volume(float(settings.DEFAULTS["robot"]["volume"] if value is None else value))
         return {"value": speaker_volume}
@@ -1780,8 +1937,13 @@ async def watch_loop() -> None:
     while True:
         await asyncio.sleep(1)
         try:
-            for t in timers.due():
-                await announce("timer" if t.about else "timer_plain", "surprised", about=t.about)
+            # Only with the robot there to say it: one due while it was off rings when it's back, as missed.
+            for t in (timers.due() if robot_socket is not None and not powering_off else []):
+                if time.time() - t.due < config.TIMER_MISSED_SECONDS:
+                    await announce("timer" if t.about else "timer_plain", "surprised", about=t.about)
+                else:
+                    at = time.strftime("%H:%M", time.localtime(t.due)).lstrip("0")
+                    await announce("timer_missed" if t.about else "timer_missed_plain", "sad", about=t.about, at=at)
             now = time.time()
             key = battery_watch.check(eyes.battery, now)
             if key:
@@ -1879,6 +2041,19 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
     lines = personality.LINES
     # Shortcuts, answered without asking the model, only when the phrase is
     # (nearly) all that was said. Anything else goes to the model as usual.
+    if is_command(norm, config.CENTER_PHRASES):
+        await center_and_relax()
+        print(f"{personality.name()} [neutral]: {lines['center']}")
+        await send_to_robot({"type": "emotion", "name": "neutral"})
+        await say(lines["center"])
+        return
+    if is_command(norm, config.FIND_PHRASES):
+        print(f"{personality.name()} [curious]: {lines['find_start']}")
+        await send_to_robot({"type": "emotion", "name": "curious" if "curious" in config.EMOTIONS else "thinking"})
+        await say(lines["find_start"])
+        awake_until = time.time() + config.AWAKE_SECONDS + 30  # the sweep takes a while
+        asyncio.create_task(find_me())
+        return
     if is_command(norm, config.TRACK_ON_PHRASES) and not is_command(norm, config.TRACK_OFF_PHRASES):
         await set_tracking(True)
         print(f"{personality.name()} [happy]: {lines['track_on']}")
@@ -1965,7 +2140,7 @@ async def main() -> None:
     speaker_volume = saved.get("robot", {}).get("volume", speaker_volume)
     if config.CHARACTER != personality.CHARACTER.id:
         try:
-            personality.use(config.CHARACTER)  # who it was when the brain stopped
+            personality.use(config.CHARACTER)  # the default personality
         except ValueError as e:
             print(f"(character {config.CHARACTER!r}: {e}; staying {personality.CHARACTER.name})")
     else:
@@ -2010,6 +2185,7 @@ async def main() -> None:
         head_task = asyncio.create_task(head_loop())
         watch_task = asyncio.create_task(watch_loop())
         hearing_task = asyncio.create_task(hearing_loop())
+        touch_task = asyncio.create_task(touch_loop())
         idle_task = asyncio.create_task(body.idle_loop())  # small head moves while he waits for you
         if config.LISTEN_ON_START:
             await start_listening()
@@ -2021,6 +2197,7 @@ async def main() -> None:
             head_task.cancel()
             watch_task.cancel()
             hearing_task.cancel()
+            touch_task.cancel()
             idle_task.cancel()
             if ears is not None:
                 stop_listening()

@@ -29,7 +29,12 @@ class ServoNeck {
 
   // The next move starts from where the servo really is (read over the bus), not from where the BSP last put it:
   // after the servos' power comes back (deep sleep), when the head may have drooped.
-  void resync() { syncNext_ = true; }
+  // holdMs: the servos just got their power back and take a moment to answer on the bus: moves wait that long,
+  // or the read fails and the BSP starts the move from where it last put the head.
+  void resync(uint32_t nowMs, uint32_t holdMs) {
+    syncNext_ = true;
+    holdUntilMs_ = (nowMs + holdMs) | 1;
+  }
 
   // Call every frame.
   void update(uint32_t nowMs);
@@ -46,5 +51,6 @@ class ServoNeck {
   float commandedDeg_ = 0;  // last angle sent to the servo
   bool dirty_ = false;
   bool syncNext_ = true;    // the first move reads the servo too (see send())
+  uint32_t holdUntilMs_ = 0;  // no moves before this (0 = none): see resync()
   uint32_t lastSendMs_ = 0;
 };

@@ -98,7 +98,7 @@ class CharacterFileTests(unittest.TestCase):
         for cid in ("rocky", "unit"):
             personality.use(cid)
             for key, line in personality.LINES.items():
-                line.format(about="tea", percent=8, minutes=12, temp=72)   # no stray {placeholders}
+                line.format(about="tea", percent=8, minutes=12, temp=72, at="7:05")   # no stray {placeholders}
 
 
 class CharacterEditingTests(CharacterFileTests):
@@ -118,12 +118,26 @@ class CharacterEditingTests(CharacterFileTests):
         personality.delete("unit")
         self.assertEqual([c.id for c in personality.available()], ["rocky", "unit-2"])
 
-    def test_rocky_is_built_in(self):
+    def test_rocky_can_be_edited_and_reset(self):
         with self.assertRaises(ValueError):
-            personality.save(self.unit(), "rocky")
-        with self.assertRaises(ValueError):
-            personality.delete("rocky")
-        self.assertEqual(personality.save(self.unit(name="Rocky")), "rocky-2")   # a copy of him is fine
+            personality.delete("rocky")                     # nothing to reset yet
+        self.assertIs(personality.load("rocky"), personality.ROCKY)
+        personality.save({**personality.to_dict(personality.ROCKY), "style": "Short."}, "rocky")
+        self.assertTrue(personality.edited("rocky"))
+        self.assertEqual(personality.load("rocky").style, "Short.")
+        self.assertEqual([c.id for c in personality.available()].count("rocky"), 1)
+        self.assertIn("rocky chan", personality.wake_words(personality.load("rocky")))   # still his names
+        personality.delete("rocky")                         # back to the original
+        self.assertIs(personality.load("rocky"), personality.ROCKY)
+        self.assertEqual(personality.save(self.unit(name="Rocky")), "rocky-2")   # a new one called Rocky is a copy
+
+    def test_the_default_cant_be_deleted(self):
+        cid = personality.save(self.unit())
+        from unittest import mock
+        with mock.patch.object(config, "CHARACTER", cid):
+            with self.assertRaises(ValueError):
+                personality.delete(cid)
+        personality.delete(cid)
 
     def test_bad_lines_and_voices_are_refused(self):
         for bad in ({"lines": {"wake": "Hi {about}"}},          # wake has nothing to fill in

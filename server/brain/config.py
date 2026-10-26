@@ -403,6 +403,21 @@ CAMERA_FOLLOWUP_SECONDS = 60.0
 TRACKING = False
 TRACK_ON_PHRASES = ["track me", "follow me", "watch me", "keep your eyes on me", "look at me"]
 TRACK_OFF_PHRASES = ["stop tracking", "stop following", "stop watching", "stop looking at me"]
+# The head's touch strip (touch.py): how the robot's raw touches become gestures.
+TOUCH_BONK_LEVEL = 3          # a tap this hard (the sensor's 1-3) is a bonk, not a pat
+TOUCH_DOUBLE_SECONDS = 0.45   # a second tap within this is a double tap
+TOUCH_PET_SETTLE_SECONDS = 0.9  # strokes end when none has come for this long...
+TOUCH_SCRATCH_STROKES = 3     # ...and this many or more is a scratch, fewer is petting
+TOUCH_LEAN_DEG = 8.0          # how far it leans into a stroking hand (tilt up)
+# "Center and relax" (the page's button too): face tracking off, the head back to the middle at rest.
+CENTER_PHRASES = ["center and relax", "relax", "center your head", "center yourself", "head center",
+                  "look straight ahead", "go back to center"]
+# "Find me": the head sweeps slowly side to side until it sees a face, then follows it (main.py find_me).
+FIND_PHRASES = ["find me", "look for me", "where am i", "find my face", "can you find me", "can you see me"]
+FIND_PAN = 90.0            # how far each way it looks (deg)
+FIND_STEP = 10.0           # one step of the sweep (deg)...
+FIND_STEP_SECONDS = 0.6    # ...this often: about 17 deg/s, slow enough for the camera to see a face
+FIND_TILTS = (0.0, 20.0)   # the sweeps' tilts above TILT_REST: at rest height, then a little higher
 # What he says when tracking starts/stops: personality.py, LINES.
 TRACK_HFOV = 62.0          # camera field of view, degrees (OV2640 stock lens)
 TRACK_VFOV = 48.0
@@ -485,4 +500,7 @@ LED_ASLEEP = "off"         # off | glow
 
 # Facts he keeps for good (the remember / forget tools; memories.py). The
 # server/data folder is git-ignored.
+# Timers set but not yet rung, so a restart doesn't lose them (timers.py); gone when none are left.
+TIMER_FILE = Path(os.environ.get("TIMER_FILE") or Path(__file__).resolve().parent.parent / "data" / "timers.json")
+TIMER_MISSED_SECONDS = 90  # rung this late (the robot was off, or the brain down): said as missed, with the time
 MEMORY_FILE = Path(os.environ.get("MEMORY_FILE") or Path(__file__).resolve().parent.parent / "data" / "memories.json")

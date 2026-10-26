@@ -1,6 +1,10 @@
 """Timers and reminders Rocky sets for his human (the set_timer and
 cancel_timer tools). When one is due, main.py's watch loop has him say so.
-Kept in memory only: restarting the brain forgets them.
+
+Kept in a small file (config.TIMER_FILE) as well as in memory, so they
+survive the brain restarting; each one leaves the file once it has rung.
+A timer only rings while the robot is connected: one that came due while
+the robot was off, or the brain was down, rings when it's back, as missed.
 
 The model sets them from a worker thread and the watch loop reads them on
 the event loop, hence the lock.
@@ -8,9 +12,12 @@ the event loop, hence the lock.
 
 from __future__ import annotations
 
+import json
+import os
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 MAX_MINUTES = 24 * 60
 MAX_TIMERS = 20
@@ -34,9 +41,39 @@ def when(t: float, now: float | None = None) -> str:
 
 
 class Timers:
-    def __init__(self) -> None:
+    def __init__(self, path: Path | None = None) -> None:
         self._lock = threading.Lock()
         self._timers: list[Timer] = []
+        self.path = path
+        self._load()
+
+    def _load(self) -> None:
+        if self.path is None or not self.path.is_file():
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            self._timers = sorted((Timer(float(t["due"]), str(t.get("about") or ""))
+                                   for t in data.get("timers", [])), key=lambda x: x.due)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+            print(f"  (timer file unreadable ({e}); starting with none)")
+            self._timers = []
+
+    def _save(self) -> None:
+        """Write the file (the lock is held), through a temporary file; remove it when there are none."""
+        if self.path is None:
+            return
+        try:
+            if not self._timers:
+                self.path.unlink(missing_ok=True)
+                return
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(self.path.name + ".tmp")
+            tmp.write_text(json.dumps({"about": "Rocky's timers, so a restart doesn't lose them.",
+                                       "timers": [asdict(t) for t in self._timers]}, indent=2) + "\n",
+                           encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError as e:
+            print(f"  (couldn't save the timers: {e})")
 
     def add(self, minutes: float, about: str = "", now: float | None = None) -> Timer:
         if not 0 < minutes <= MAX_MINUTES:
@@ -47,6 +84,7 @@ class Timers:
                 raise ValueError(f"already {MAX_TIMERS} timers set")
             self._timers.append(t)
             self._timers.sort(key=lambda x: x.due)
+            self._save()
         return t
 
     def cancel(self, about: str) -> list[Timer]:
@@ -62,6 +100,8 @@ class Timers:
                 if not gone and len(self._timers) == 1:
                     gone = self._timers
             self._timers = [t for t in self._timers if t not in gone]
+            if gone:
+                self._save()
         return gone
 
     def due(self, now: float | None = None) -> list[Timer]:
@@ -69,7 +109,9 @@ class Timers:
         now = now if now is not None else time.time()
         with self._lock:
             ready = [t for t in self._timers if t.due <= now]
-            self._timers = [t for t in self._timers if t.due > now]
+            if ready:
+                self._timers = [t for t in self._timers if t.due > now]
+                self._save()
         return ready
 
     def pending(self) -> list[Timer]:

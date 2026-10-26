@@ -22,6 +22,7 @@
 #include "wake.h"
 #include "servo_neck.h"
 #include "speaker.h"
+#include "touch_gestures.h"
 
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -46,6 +47,7 @@ Face face(gfx);
 ServoNeck panNeck;
 ServoNeck tiltNeck;
 Link brainLink;
+TouchGestures touch;  // the head's touch strip, as gestures for the brain
 Speaker speaker;
 Mic mic;
 Wake wake;
@@ -300,6 +302,17 @@ bool deepSleep = false;
 
 bool onBattery() { return batteryMa > ON_BATTERY_MA; }
 
+uint32_t servoOffAtMs = 0;  // deep sleep: when to cut the servos' power (the head is going down first); 0 = not pending
+static const uint32_t SERVO_OFF_DELAY_MS = 1500;
+static const uint32_t SERVO_WAKE_MS = 600;  // power back on: the servos answer on the bus after this
+
+void checkServoOff(uint32_t now) {
+  if (servoOffAtMs && deepSleep && static_cast<int32_t>(now - servoOffAtMs) >= 0) {
+    servoOffAtMs = 0;
+    M5StackChan.setServoPowerEnabled(false);
+  }
+}
+
 void setDeepSleep(bool on) {
   if (on == deepSleep) return;
   deepSleep = on;
@@ -307,11 +320,18 @@ void setDeepSleep(bool on) {
     M5.Display.setBrightness(0);
     M5.Display.sleep();
     WiFi.setSleep(true);  // modem sleep: asleep, he sends nothing but a reading every 10 s
-    M5StackChan.setServoPowerEnabled(false);
+    // Head to the middle and down as far as it goes before the servos lose power (it would droop anyway);
+    // checkServoOff() cuts it once the move is done.
+    panNeck.setRaw(0);
+    tiltNeck.setRaw(TILT_MIN_DEG);
+    panNeck.update(millis());
+    tiltNeck.update(millis());
+    servoOffAtMs = (millis() + SERVO_OFF_DELAY_MS) | 1;
   } else {
+    servoOffAtMs = 0;
     M5StackChan.setServoPowerEnabled(true);
-    panNeck.resync();  // the head may have drooped while they were off
-    tiltNeck.resync();
+    panNeck.resync(millis(), SERVO_WAKE_MS);  // the head may have drooped while they were off
+    tiltNeck.resync(millis(), SERVO_WAKE_MS);
     WiFi.setSleep(false);
     M5.Display.wakeup();
     M5.Display.setBrightness(face.asleep() ? max(awakeBrightness / 4, 8) : awakeBrightness);
@@ -321,11 +341,23 @@ void setDeepSleep(bool on) {
 }
 
 // Shows why, waits for any speech to finish, and cuts the power.
+static const uint32_t SEND_SETTLE_MS = 50;  // past ServoNeck's minimum gap between moves
+
 void powerOff(const String& why) {
   Serial.printf("power: off (%s)\n", why.c_str());
   leds.setBrightness(0);  // dark before the power goes (they'd keep their last colour)
   M5StackChan.showRgbColor(0, 0, 0);
   setDeepSleep(false);
+  // Head to the middle and down as far as it goes, as when it falls asleep: with the power gone it would droop.
+  // The loop (which sends moves) is stopped from here on, so send them now; the BSP's own task carries them out
+  // during the goodbye and the screen below.
+  panNeck.setTarget(0);
+  tiltNeck.setTarget(TILT_MIN_DEG);
+  for (uint32_t waited = 0; waited <= SERVO_WAKE_MS + SEND_SETTLE_MS; waited += SEND_SETTLE_MS) {
+    delay(SEND_SETTLE_MS);  // out of deep sleep, the servos need a moment before they take a move
+    panNeck.update(millis());
+    tiltNeck.update(millis());
+  }
   for (int i = 0; i < 100 && speaker.speaking(); ++i) delay(100);  // the goodbye, if still playing
   M5.Display.setBrightness(max(awakeBrightness, (uint8_t)64));
   M5.Display.fillScreen(TFT_BLACK);
@@ -668,6 +700,7 @@ void updatePower(uint32_t now) {
       powerOff("battery");  // the brain says goodbye first if it can; this is the backstop
     }
   }
+  checkServoOff(now);
   if (!onBattery() && !screenCfg.powerBank) {
     setDeepSleep(false);  // plugged in: back to normal
   } else if (face.asleep() && asleepSinceMs && msSince(now, asleepSinceMs) >= DEEP_SLEEP_AFTER_MS) {
@@ -740,7 +773,7 @@ void setup() {
   face.setIdle(true);
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.30 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.34 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -784,8 +817,16 @@ void loop() {
     }
   }
 
-  // A pat on the head gets a blink.
+  // A pat on the head gets a blink at once; the brain hears the gesture and answers it.
   if (M5StackChan.TouchSensor.wasPressed()) face.blink();
+  {
+    auto& ts = M5StackChan.TouchSensor;
+    int swiped = ts.wasSwipedForward() ? 1 : ts.wasSwipedBackward() ? -1 : 0;
+    touch.update(millis(), ts.getIntensities(), swiped, [](const char* json) {
+      Serial.printf("touch: %s\n", json);
+      if (brainLink.connected()) brainLink.sendJson(json);
+    });
+  }
 
   uint32_t now = millis();
   uint32_t t0 = micros();

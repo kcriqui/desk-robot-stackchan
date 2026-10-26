@@ -27,7 +27,7 @@ SCHEMA: dict[str, dict[str, tuple]] = {
         "near_stop":     ("NEAR_STOP", "bool", None),        # a hand over the sensor stops it talking
         "near_level":    ("NEAR_LEVEL", "int", (1, 2047)),   # the proximity reading that counts as near
         "power_bank":    ("POWER_BANK", "bool", None),       # on a USB power bank: deep sleep, no idle power-off
-        "character":     ("CHARACTER", "str", 40),       # remembered when switched
+        "character":     ("CHARACTER", "str", 40),       # the default personality: who the brain starts as
         "face_pack":     ("FACE_PACK", "str", 48),       # for characters that don't choose one
     },
     "clock": {

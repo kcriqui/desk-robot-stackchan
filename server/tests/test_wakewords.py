@@ -81,6 +81,40 @@ class SayAsTests(unittest.TestCase):
         self.assertEqual(mouth.clean_for_tts("Gladiators are fine"), "Gladiators are fine.")
 
 
+class TouchTests(unittest.TestCase):
+    """The head's touch strip (touch.py): taps, strokes and holds as gestures."""
+
+    def test_taps(self):
+        from brain.touch import Touches
+        t = Touches()
+        self.assertEqual(t.feed({"g": "tap", "level": 1}, 0.0), [])
+        self.assertEqual(t.poll(0.2), [])                          # maybe a double yet
+        self.assertEqual(t.poll(1.0), ["pat"])
+        t.feed({"g": "tap", "level": 2}, 2.0)
+        self.assertEqual(t.feed({"g": "tap", "level": 1}, 2.3), ["double"])
+        self.assertEqual(t.poll(3.0), [])
+        self.assertEqual(t.feed({"g": "tap", "level": 3}, 4.0), ["bonk"])
+
+    def test_strokes_and_holds(self):
+        from brain.touch import Touches
+        t = Touches()
+        self.assertEqual(t.feed({"g": "swipe", "dir": "fwd"}, 0.0), ["lean"])
+        self.assertEqual(t.feed({"g": "swipe", "dir": "back"}, 0.5), [])
+        self.assertEqual(t.poll(1.0), [])
+        self.assertEqual(t.poll(1.5), ["pet"])                     # two strokes
+        for i in range(4):
+            t.feed({"g": "swipe", "dir": "fwd"}, 10.0 + i * 0.3)
+        self.assertEqual(t.poll(12.0), ["scratch"])                # four quick ones
+        self.assertEqual(t.feed({"g": "hold", "s": 1}, 20.0), ["hold"])
+        self.assertEqual(t.feed({"g": "hold", "s": 3}, 22.0), ["tuck"])
+        self.assertEqual(t.feed({"g": "release"}, 23.0), ["release"])
+
+    def test_choices_in_a_line(self):
+        from brain import main
+        self.assertIn(main.pick("a | b | c"), ("a", "b", "c"))
+        self.assertEqual(main.pick("Just one."), "Just one.")
+
+
 @unittest.skipUnless(kws.available(), "no keyword model here (it's in the NAS's cache)")
 class SpotterTests(unittest.TestCase):
     def test_tokens_and_silence(self):

@@ -48,6 +48,10 @@ void ServoNeck::send(float deg) {
 }
 
 void ServoNeck::update(uint32_t nowMs) {
+  if (holdUntilMs_) {
+    if (static_cast<int32_t>(nowMs - holdUntilMs_) < 0) return;  // the servos are still starting up
+    holdUntilMs_ = 0;
+  }
   if (dirty_ && nowMs - lastSendMs_ >= SEND_INTERVAL_MS) {
     send(targetDeg_);
     dirty_ = false;

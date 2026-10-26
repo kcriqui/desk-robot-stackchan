@@ -319,7 +319,7 @@
         <button type="button" class="primary" id="charnew">New personality</button>
         <label class="linkish">Import a personality file…<input type="file" id="charimport" accept=".json,application/json" class="visually-hidden"></label>
       </div>
-      <p class="hint">Switching is instant and starts a fresh conversation; memories stay, and the wake word is still the robot's. Yours are saved in server/characters/. A personality tells the language model how to behave: read one from someone else before you use it.</p>
+      <p class="hint">Switching is instant and starts a fresh conversation; memories stay. The default is who the brain starts as. Rocky can be edited too (Reset to original undoes it). Yours are saved in server/characters/. A personality tells the language model how to behave: read one from someone else before you use it.</p>
 
       <div class="chardetail">
         <h2 class="label"><span id="chartitle">—</span><span class="saved" id="charsaved"></span></h2>
@@ -328,6 +328,7 @@
           <button type="button" class="primary" id="charuse">Use this personality</button>
           <button type="button" id="charexport">Export</button>
           <button type="button" id="chardup">Duplicate</button>
+          <button type="button" id="chardefault">Make default</button>
           <button type="button" class="astro" id="chardelete">Delete</button>
         </div>
         <form id="charform" class="charform" novalidate hidden>
@@ -834,8 +835,11 @@
   const charOf = id => cstate.list.find(c => c.id === id);
   const MAIN_LINES = ["wake", "sleep", "track_on", "track_off"];
   const LINE_NAMES = { wake: "Woken with nothing else said", sleep: "Going to sleep", track_on: "Starting to follow your face",
-    track_off: "Stopping", search: "Before a web search", dance: "Before dancing", timer: "A timer is done (with what it's for)",
-    timer_plain: "A timer is done", battery_low: "Battery low", battery_very_low: "Battery very low", battery_critical: "Battery critical",
+    track_off: "Stopping", center: "Center and relax", touch_pat: "A pat on the head: a fist bump (a | b | c: one at random)",
+    touch_pet: "Petted (stroked along its head)", touch_scratch: "Scratched (quick strokes)", touch_bonk: "Bonked (a hard tap)",
+    touch_tuck: "A hand resting on its head: goodnight", find_start: "Asked to find you", find_found: "Found you", find_lost: "Couldn't find you", search: "Before a web search", dance: "Before dancing", timer: "A timer is done (with what it's for)",
+    timer_plain: "A timer is done", timer_missed: "A timer was missed while off (what, when)",
+    timer_missed_plain: "A timer was missed while off (when)", battery_low: "Battery low", battery_very_low: "Battery very low", battery_critical: "Battery critical",
     battery_saved: "Plugged in again", power_off_idle: "Powering off after a long quiet", power_off_idle_timers: "…with a timer still set",
     power_off_battery: "Powering off, battery empty", power_off_bank: "Powering off, power pack empty", power_off_confirm: "Asked to power off (wants a yes)",
     power_off_asked: "Powering off, as asked", hot: "Running hot", very_hot: "Too hot" };
@@ -882,7 +886,8 @@
       b.setAttribute("aria-pressed", !cstate.isNew && c.id === cstate.sel);
       const name = document.createElement("span"); name.className = "cname"; name.textContent = c.character.name;
       const tags = document.createElement("span"); tags.className = "ptags";
-      tags.textContent = [c.id === cstate.active ? "In use" : "", c.builtin ? "Built-in" : "Yours",
+      tags.textContent = [c.id === cstate.active ? "In use" : "", c.id === cstate.meta.default ? "Default" : "",
+                          c.builtin ? (c.edited ? "Built-in, edited" : "Built-in") : "Yours",
                           (c.character.voice.piper || cstate.meta.default_voice).replace(/^\w+-|-\w+$/g, "")].filter(Boolean).join(" · ");
       if (c.id === cstate.active) tags.classList.add("on");
       b.append(name, tags);
@@ -897,13 +902,18 @@
     cstate.sel = c.id; cstate.isNew = false;
     for (const b of $("charlist").children) b.setAttribute("aria-pressed", b.dataset.id === c.id);
     $("chartitle").textContent = c.character.name;
-    $("chardesc").textContent = c.builtin ? c.character.description + ". Wake words: " + (c.wake_words || []).join(", ") +
-      ". Duplicate him to make one of your own from his." : "";
+    $("chardesc").textContent = c.builtin ? "Built in" + (c.edited ? ", with your changes (Reset to original undoes them)" : "") +
+      ". Wake words: " + (c.wake_words || []).join(", ") + " (his names are added to the ones below)." : "";
     $("charactions").hidden = false;
     $("charuse").disabled = c.id === cstate.active; $("charuse").textContent = c.id === cstate.active ? "In use" : "Use this personality";
-    $("chardelete").hidden = c.builtin;
-    $("charform").hidden = c.builtin;
-    if (!c.builtin) fillCharForm(c.character);
+    const isDefault = c.id === cstate.meta.default;
+    $("chardefault").disabled = isDefault; $("chardefault").textContent = isDefault ? "The default" : "Make default";
+    $("chardelete").hidden = c.builtin && !c.edited;
+    $("chardelete").textContent = c.builtin ? "Reset to original" : "Delete";
+    $("chardelete").disabled = !c.builtin && isDefault;
+    $("chardelete").title = !c.builtin && isDefault ? "The default can't be deleted: make another the default first" : "";
+    $("charform").hidden = false;
+    fillCharForm(c.character);
     markCharDirty(false); $("charsaved").textContent = "";
   }
   function blankChar() {
@@ -975,13 +985,22 @@
   $("charuse").onclick = () => { if (confirmCharDiscard()) useChar(cstate.sel).catch(e => toast(e.message, true)); };
   $("chardelete").onclick = async () => {
     const c = charOf(cstate.sel);
-    if (!c || !confirm(`Delete the personality “${c.character.name}”? This can't be undone.`)) return;
+    if (!c) return;
+    const ask = c.builtin ? `Undo all your changes to ${c.character.name} and go back to the original? This can't be undone.`
+                          : `Delete the personality “${c.character.name}”? This can't be undone.`;
+    if (!confirm(ask)) return;
     try {
       await api("character_delete", { id: c.id });
-      cstate.dirty = false; cstate.sel = "rocky";
-      toast(c.id === cstate.active ? "Deleted · back to Rocky" : "Deleted");
-      await loadChars("rocky");
+      cstate.dirty = false;
+      const back = c.builtin ? c.id : cstate.meta.default; cstate.sel = back;
+      toast(c.builtin ? "Back to the original" : c.id === cstate.active ? "Deleted · back to " + (charOf(back)?.character.name || back) : "Deleted");
+      await loadChars(back);
     } catch (e) { toast(e.message, true); }
+  };
+  $("chardefault").onclick = async () => {
+    const c = charOf(cstate.sel); if (!c) return;
+    try { await api("setting", { section: "robot", key: "character", value: c.id }); toast(c.character.name + " is the default: the brain starts as " + c.character.name); await loadChars(c.id); }
+    catch (e) { toast(e.message, true); }
   };
   $("chardup").onclick = async () => {
     if (!confirmCharDiscard()) return;

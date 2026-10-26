@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-static const char* FW_VERSION = "0.6.9.30";
+static const char* FW_VERSION = "0.6.9.34";
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,

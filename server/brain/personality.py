@@ -8,8 +8,10 @@ The rest of the system prompt is the same for everyone: short spoken
 replies, honesty about the camera, the abilities, the memory, the emotion
 tag (_shared below).
 
-Rocky is built in (ROCKY). Other characters are JSON files in
-server/characters/ (git-ignored), with the same fields:
+Rocky is built in (ROCKY); editing him writes server/characters/rocky.json,
+which then stands in for the built-in one until it's deleted ("reset to the
+original"). Other characters are JSON files there too (git-ignored), with the
+same fields:
 
     {
       "name": "GLaDOS",
@@ -126,8 +128,19 @@ details.""",
         "sleep": "I sleep. You watch. Wake me when you find bug.",
         "track_on": "Yes yes yes. Eyes on {human}.",
         "track_off": "Okay. Eyes free.",
+        "center": "Okay. Head rest.",
+        "touch_pat": "Fist my bump! | Bump! Strong, {human}. | Fist bump, yes yes!",
+        "touch_pet": "Mm. Good, good. | Hand warm. Like. | Happy, happy.",
+        "touch_scratch": "Yes yes yes! There, there! | Tickle! Amaze! | More, {human}, more!",
+        "touch_bonk": "Ow! Why, {human}? | Bad! Hit is bad. | Hey! Head not drum.",
+        "touch_tuck": "Okay. I sleep. Good night, {human}.",
+        "find_start": "Where is {human}? I look.",
+        "find_found": "Found you, {human}!",
+        "find_lost": "Not find you, {human}. You hide good.",
         "timer": "{human}! Timer done: {about}.",
         "timer_plain": "{human}! Timer done!",
+        "timer_missed": "{human}, sorry! I was off. Timer for {about} rang at {at}.",
+        "timer_missed_plain": "{human}, sorry! I was off. Your timer rang at {at}.",
         "battery_low": "{human}, battery low. {percent} percent left. Plug me in soon, please.",
         "battery_very_low": "Battery {percent} percent, {human}! Maybe {minutes} minutes left. Need USB, please.",
         "battery_critical": "Bad bad bad! Battery almost empty, {human}! Plug me in now, or I go dark!",
@@ -155,8 +168,19 @@ DEFAULT_LINES = {
     "sleep": "Going to sleep.",
     "track_on": "Watching you, {human}.",
     "track_off": "Stopped watching.",
+    "center": "Okay, relaxing.",
+    "touch_pat": "Fist bump! | Bump. | Nice one, {human}.",
+    "touch_pet": "That's nice. | Mm, thank you. | I like that.",
+    "touch_scratch": "Ooh, right there! | Ha! That tickles! | More, please.",
+    "touch_bonk": "Ow! | Hey! What was that for? | Easy, {human}!",
+    "touch_tuck": "Okay, {human}. Good night.",
+    "find_start": "Looking for you, {human}.",
+    "find_found": "There you are.",
+    "find_lost": "I can't find you, {human}.",
     "timer": "{human}, your timer is done: {about}.",
     "timer_plain": "{human}, your timer is done.",
+    "timer_missed": "{human}, I missed your timer while I was off: {about}, at {at}.",
+    "timer_missed_plain": "{human}, I missed your timer while I was off. It was due at {at}.",
     "battery_low": "{human}, my battery is low: {percent} percent. Please plug me in soon.",
     "battery_very_low": "Battery at {percent} percent, about {minutes} minutes left. I need USB power.",
     "battery_critical": "My battery is almost empty, {human}. Plug me in now.",
@@ -273,7 +297,7 @@ def build_prompt(c: Character) -> str:
 
 
 def build_lines(c: Character) -> dict[str, str]:
-    """The canned lines, with {human} filled in; {about}, {percent}, {minutes}
+    """The canned lines, with {human} filled in; {about}, {at}, {percent}, {minutes}
     and {temp} stay for main.py to fill."""
     return {k: _fill(v, c) for k, v in {**DEFAULT_LINES, **c.lines}.items()}
 
@@ -282,9 +306,16 @@ def build_lines(c: Character) -> dict[str, str]:
 
 
 def load(char_id: str) -> Character:
-    """A character by id: "rocky", or server/characters/<id>.json. Raises ValueError for a bad or missing one."""
+    """A character by id: server/characters/<id>.json, or for "rocky" the built-in Rocky when he hasn't been
+    edited (or his file is broken: he's always there). Raises ValueError for a bad or missing one."""
     if char_id == ROCKY.id:
-        return ROCKY
+        if not edited(ROCKY.id):
+            return ROCKY
+        try:
+            return parse(ROCKY.id, json.loads(_path(ROCKY.id).read_text(encoding="utf-8")))
+        except (OSError, ValueError) as e:
+            print(f"(server/characters/rocky.json: {e}; using the built-in Rocky)")
+            return ROCKY
     try:
         d = json.loads(_path(char_id).read_text(encoding="utf-8"))
     except OSError as e:
@@ -292,6 +323,11 @@ def load(char_id: str) -> Character:
     except json.JSONDecodeError as e:
         raise ValueError(f"server/characters/{char_id}.json: {e}") from e
     return parse(char_id, d)
+
+
+def edited(char_id: str) -> bool:
+    """Has the built-in Rocky been edited (a rocky.json)? Always true of the others, which are only files."""
+    return char_id != ROCKY.id or _path(ROCKY.id).is_file()
 
 
 def _path(char_id: str) -> Path:
@@ -426,8 +462,6 @@ def save(d, char_id: str | None = None) -> str:
         ex = ex.splitlines()
     if isinstance(ex, list):
         d["examples"] = [_face_first(str(e).strip()) for e in ex if str(e).strip()]
-    if char_id == ROCKY.id:
-        raise ValueError("Rocky is built in: duplicate him to make one of your own")
     if char_id is None:
         base = re.sub(r"[^a-z0-9]+", "-", str(d.get("name", "")).lower()).strip("-")[:36] or "character"
         char_id, n = (base if base != ROCKY.id else "rocky-2"), 1
@@ -444,8 +478,12 @@ def save(d, char_id: str | None = None) -> str:
 
 
 def delete(char_id: str) -> None:
-    if char_id == ROCKY.id:
-        raise ValueError("Rocky is built in and can't be deleted")
+    """Delete a character's file; for Rocky that's going back to the built-in one, so he can't be lost. The
+    default one (config.CHARACTER) can't be deleted: make another the default first."""
+    if char_id == ROCKY.id and not edited(ROCKY.id):
+        raise ValueError("Rocky is built in: there's nothing to reset")
+    if char_id != ROCKY.id and char_id == config.CHARACTER:
+        raise ValueError("that's the default personality: make another the default first")
     path = _path(char_id)
     if not path.exists():
         raise ValueError(f"no character {char_id!r}")
@@ -536,8 +574,10 @@ def draft(client, name: str, description: str) -> dict:
 
 def available() -> list[Character]:
     """Rocky, then every character file that loads (broken ones are reported and skipped)."""
-    out = [ROCKY]
+    out = [load(ROCKY.id)]
     for f in sorted(CHARACTERS_DIR.glob("*.json")) if CHARACTERS_DIR.is_dir() else []:
+        if f.stem == ROCKY.id:
+            continue  # he's first, above
         try:
             out.append(load(f.stem))
         except ValueError as e:

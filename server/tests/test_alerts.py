@@ -142,6 +142,23 @@ class PowerOffWatchTests(unittest.TestCase):
 
 
 class TimerTests(unittest.TestCase):
+    def test_kept_in_a_file_till_rung(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "timers.json"
+            ts = Timers(path)
+            ts.add(5, "tea", now=0)
+            ts.add(1, "", now=0)
+            again = Timers(path)                      # the brain restarted
+            self.assertEqual([(t.due, t.about) for t in again.pending()], [(60, ""), (300, "tea")])
+            self.assertEqual([t.about for t in again.due(now=100)], [""])
+            self.assertEqual([t.about for t in Timers(path).pending()], ["tea"])
+            again.cancel("tea")
+            self.assertFalse(path.exists(), "no file once none are left")
+            path.write_text("not json", encoding="utf-8")
+            self.assertEqual(Timers(path).pending(), [])  # a damaged file: none, not a crash
+
     def test_set_ring_and_cancel(self):
         ts = Timers()
         ts.add(5, "tea", now=0)
