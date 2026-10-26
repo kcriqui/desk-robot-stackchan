@@ -141,6 +141,9 @@ if TTS_ENGINE not in ("auto", "fish", "piper", "builtin"):
 # add a voice, try it in a Piper sandbox, then add it here with its hashes.
 # A community voice from elsewhere gives its own pinned "url" (the file name
 # without .onnx / .onnx.json).
+# Names the voices misread, and spellings they say right (whole words, any case), checked with Piper's own
+# phonemizer (.devtools/nas-brain/cache/say_probe.py): every voice reads GLaDOS as letters, "Gee-La-DOS".
+SAY_AS = {"GLaDOS": "Gladoss"}
 PIPER_REVISION = "5041a7a49ae5b3a0f30e6837769eb03fdbb231bd"
 PIPER_VOICES = {
     "en_US-ryan-medium": {  # chosen 2026-10-21
@@ -229,6 +232,25 @@ ROBOT_WAKE_WORD = os.environ.get("ROBOT_WAKE_WORD", "computer").strip().lower()
 # After the robot wakes, how long to wait for something to be said before
 # deciding it was a false wake and going back to sleep.
 ROBOT_WAKE_GRACE_SECONDS = 8.0
+# Who listens for the wake word (a setting): "brain" = the robot streams its mic while asleep too, and the brain's
+# keyword spotter (kws.py, wakewords.py) listens for every personality's wake words, which also switch to it, and
+# for WAKE_WORDS; "robot" = the robot's own WakeNet "Computer" only (no audio while asleep: saves battery and LAN).
+WAKE_ENGINE = os.environ.get("WAKE_ENGINE", "brain").strip().lower()
+WAKE_WORDS = os.environ.get("WAKE_WORDS", "computer, robot, bot")  # comma-separated: wake whoever is in use
+KWS_MODEL_DIR = Path(os.environ.get("DESK_ROBOT_CACHE", Path.home() / ".cache" / "desk-robot")) / "kws" / \
+    "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
+# The keyword spotter (a setting): off. On 130 of the user's recorded clips (2026-10-25, .devtools/kws_tune.py)
+# its best setting caught 5 of 14 real wake phrases and fired on 3 of 116 others, though it did well on synthetic
+# speech. With the mic streaming, the transcript (Parakeet, Whisper's second listen) wakes it on its own.
+KWS_ENABLED = False
+KWS_BOOST = 2.0       # per-phrase boost and trigger threshold (the model's own: 1.0 and 0.25); measured on
+KWS_THRESHOLD = 0.15  # synthetic clips 2026-10-25: these caught "hey Juniper" in both voices, no new false hits
+# Keep every utterance heard, as a WAV plus a line in index.jsonl (what was heard, by which engine, whether a
+# wake word was spotted), for tuning the wake words and comparing speech-to-text engines. Local only; the
+# oldest go past RECORD_KEEP. A setting; "" = off.
+RECORD_DIR = os.environ.get("RECORD_DIR", str(Path(__file__).resolve().parent.parent / "data" / "recordings"))
+RECORD_UTTERANCES = os.environ.get("RECORD_UTTERANCES", "1") not in ("", "0")
+RECORD_KEEP = 2000
 WAKE_PHRASES = list(dict.fromkeys(WAKE_PHRASES))
 # Also wake on his name alone at the very start of a sentence ("Rocky, ...",
 # "Rocky."). A name further in ("I told Rocky...") still doesn't wake him.
@@ -236,8 +258,12 @@ WAKE_PHRASES = list(dict.fromkeys(WAKE_PHRASES))
 # make it into the transcript.
 WAKE_ON_NAME = BODY == "stackchan"
 # Speech-to-text engine. STT_ENGINE in server/.env:
-#   whisper    faster-whisper (STT_MODEL below), the default. It's told his
-#              name (STT_PROMPT), which helps it hear "Rocky".
+#   parakeet   NVIDIA Parakeet TDT 0.6B on the CPU (brain/parakeet.py), the
+#              default: the fewest errors of five engines on the user's test
+#              clips (2.7% WER vs Whisper base.en 5.4%), 0.09 s a clip on the
+#              PC. ~660 MB, downloaded once. It can't be told names.
+#   whisper    faster-whisper (STT_MODEL below). It's told every
+#              personality's name (STT_PROMPT), which helps it hear them.
 #   moonshine  Moonshine (brain/moonshine.py, MOONSHINE_MODEL tiny or base):
 #              7-10x faster on short questions, since Whisper always works
 #              through a 30 s window. Worth it on a slow CPU. It can't be
@@ -245,9 +271,9 @@ WAKE_ON_NAME = BODY == "stackchan"
 # DEBUG_STT_COMPARE=1 in server/.env also runs the other engine on each
 # utterance (after the reply has started) and prints both transcripts, to
 # judge Moonshine on your own voice before switching. It costs CPU time.
-STT_ENGINE = os.environ.get("STT_ENGINE", "whisper").strip().lower()
-if STT_ENGINE not in ("whisper", "moonshine"):
-    raise SystemExit(f"STT_ENGINE={STT_ENGINE!r} in server/.env: use whisper or moonshine")
+STT_ENGINE = os.environ.get("STT_ENGINE", "parakeet").strip().lower()
+if STT_ENGINE not in ("parakeet", "whisper", "moonshine"):
+    raise SystemExit(f"STT_ENGINE={STT_ENGINE!r} in server/.env: use parakeet, whisper or moonshine")
 MOONSHINE_MODEL = os.environ.get("MOONSHINE_MODEL", "base").strip().lower()
 DEBUG_STT_COMPARE = os.environ.get("DEBUG_STT_COMPARE", "") not in ("", "0")
 # Threads for the end-of-turn model (Smart Turn). 2 is plenty on a fast

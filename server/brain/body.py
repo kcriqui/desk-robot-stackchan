@@ -207,7 +207,8 @@ class Body:
             dp, dt = self._idle_off
             if await self._go(dp, dt - 3.0):
                 await asyncio.sleep(0.3)
-                await self._go(dp, dt)
+                if not self.hush():                # you started talking: no more servo noise till you're done
+                    await self._go(dp, dt)
         elif r < middle + nod + look:             # a proper look around: something caught his eye
             self._idle_off = (random.choice((-1, 1)) * random.uniform(*IDLE_LOOK), random.uniform(-6.0, 10.0))
             await self._go(*self._idle_off)

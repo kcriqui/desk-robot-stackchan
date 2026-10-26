@@ -91,6 +91,8 @@ def clean_for_tts(text: str) -> str:
     """What the voice model gets: plain spoken words. Markdown marks, emoji
     and runs of punctuation tend to make generated speech do odd things."""
     text = _EMOJI.sub("", _MARKUP.sub("", text))
+    for word, said in config.SAY_AS.items():         # names the voice would misread
+        text = re.sub(rf"\b{re.escape(word)}\b", said, text, flags=re.IGNORECASE)
     text = re.sub(r"([!?.,])\1+", r"\1", text)      # "!!!" -> "!"
     text = re.sub(r"\.{2,}", ".", text)              # "..." -> "."
     text = re.sub(r"\s+", " ", text).strip()

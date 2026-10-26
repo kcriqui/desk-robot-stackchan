@@ -6,7 +6,10 @@ stream) or the robot's PDM mic, whose frames arrive over the WebSocket and
 are handed in through push_audio(). `source` picks which one is live.
 
 Pipeline:  mic blocks → Segmenter (Silero VAD + Smart Turn, see turn.py) →
-Transcriber (faster-whisper or Moonshine, local, no cloud) → on_utterance(text, ...)
+Transcriber (Parakeet, faster-whisper or Moonshine, local, no cloud) → on_utterance(text, ...)
+The same blocks also go, on a thread of their own, to the wake-word spotter
+(kws.py), which calls on_keyword(phrase, when) the moment it hears one.
+With config.RECORD_UTTERANCES each turn is also kept on disk (_Recorder).
 
 Where a turn ends is decided the way people do it, not by a fixed silence:
 a 0.2 s pause makes the Smart Turn model listen to the whole sentence and
@@ -16,6 +19,8 @@ you sound mid-thought he keeps listening.
 
 from __future__ import annotations
 
+import json
+import os
 import queue
 import re
 import threading
@@ -216,7 +221,10 @@ class Transcriber:
 
 
 def make_transcriber(engine: str):
-    """The speech-to-text engine (config.STT_ENGINE): whisper or moonshine."""
+    """The speech-to-text engine (config.STT_ENGINE): parakeet, whisper or moonshine."""
+    if engine == "parakeet":
+        from .parakeet import ParakeetTranscriber
+        return ParakeetTranscriber()
     if engine == "moonshine":
         from .moonshine import MoonshineTranscriber
         return MoonshineTranscriber()
@@ -333,6 +341,34 @@ def _save_wav(audio: np.ndarray, path: str) -> None:
         pass
 
 
+class _Recorder:
+    """Every turn heard as RECORD_DIR/<when>.wav, plus a line in RECORD_DIR/index.jsonl saying what was heard and
+    which wake words the spotter caught during it. Keeps the newest RECORD_KEEP."""
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    def save(self, audio: np.ndarray, row: dict) -> None:
+        if not (config.RECORD_UTTERANCES and config.RECORD_DIR):
+            return
+        try:
+            stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(row["started_at"]))
+            name = f"{stamp}-{int(row['started_at'] * 1000) % 1000:03d}.wav"
+            _save_wav(audio, os.path.join(config.RECORD_DIR, name))
+            with open(os.path.join(config.RECORD_DIR, "index.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps({"file": name, **row}, ensure_ascii=False) + "\n")
+            self.count += 1
+            if self.count % 50 == 1:
+                self._prune()
+        except OSError as e:
+            print(f"(recording: {e})")
+
+    def _prune(self) -> None:
+        wavs = sorted(f for f in os.listdir(config.RECORD_DIR) if f.endswith(".wav"))
+        for f in wavs[:max(0, len(wavs) - config.RECORD_KEEP)]:
+            os.remove(os.path.join(config.RECORD_DIR, f))
+
+
 class Ears:
     """Owns the microphone stream and a worker thread. Calls
     on_utterance(text, started_at, ended_at) from the worker thread for every
@@ -345,8 +381,17 @@ class Ears:
         on_utterance: Callable[[str, float, float], None],
         on_speech_start: Callable[[], None] | None = None,
         device: int | str | None = config.MIC_DEVICE,
+        spotter=None,
+        on_keyword: Callable[[str, float], None] | None = None,
     ) -> None:
         self.on_utterance = on_utterance
+        # The wake-word spotter (kws.Spotter, or None) and what to call when it hears one: on its own thread, so
+        # a slow transcription never delays a wake. Recent hits are kept for the recordings.
+        self.spotter = spotter
+        self.on_keyword = on_keyword
+        self._kws_blocks: queue.Queue[np.ndarray] = queue.Queue(maxsize=200)
+        self.keyword_hits: deque[tuple[float, str]] = deque(maxlen=20)
+        self._recorder = _Recorder()
         self.device = device
         self.device_name = "?"
         self.mac_error: str | None = None  # why the Mac mic could not be opened, if it couldn't
@@ -360,20 +405,20 @@ class Ears:
         self._segmenter = Segmenter(SileroVAD(), SmartTurn(config.TURN_THREADS), on_speech_start,
                                     pre_roll=config.PRE_ROLL_SECONDS)
         self.transcriber = make_transcriber(config.STT_ENGINE)
-        # Moonshine can't be told his name and often mishears it ("You rocket
-        # champ"), or a lone "Computer" ("Conqueror", "You cheater"), so while
+        # Moonshine and Parakeet can't be told his name and may mishear it ("You
+        # rocket champ", "GWADOS"), or a lone "Computer" ("Conqueror"), so while
         # he needs a wake word, an utterance in which it found none gets a
         # second listen from Whisper. main.py sets wake_needed (he's asleep,
         # or his awake time is up, or the robot just heard its wake word) and
         # has_wake_word (which word counts at the moment).
         self.wake_needed: Callable[[], bool] = lambda: False
         self.has_wake_word: Callable[[str], bool] = lambda text: strip_wake_word(text)[0]
-        self._wake_check = _OneAtATime(Transcriber()) if config.STT_ENGINE == "moonshine" else None
+        self._wake_check = _OneAtATime(Transcriber()) if config.STT_ENGINE != "whisper" else None
         # DEBUG_STT_COMPARE: the other engine hears each utterance too, on its
         # own thread after this one has passed it on, so replies aren't delayed.
         self._compare: tuple[str, object, queue.Queue] | None = None
         if config.DEBUG_STT_COMPARE:
-            other = "whisper" if config.STT_ENGINE == "moonshine" else "moonshine"
+            other = "whisper" if config.STT_ENGINE != "whisper" else "moonshine"
             self._compare = (other, self._wake_check or make_transcriber(other), queue.Queue(maxsize=1))
             threading.Thread(target=self._run_compare, daemon=True).start()
 
@@ -407,6 +452,32 @@ class Ears:
         block = self._highpass.process(block)
         self.level = float(np.sqrt(np.mean(block * block)))
         self._blocks.put(block)
+        self._to_spotter(block)
+
+    def _to_spotter(self, block: np.ndarray) -> None:
+        if self.spotter is not None:
+            try:
+                self._kws_blocks.put_nowait(block)
+            except queue.Full:
+                pass  # it fell behind (it shouldn't, at ~4% of a core): drop rather than lag
+
+    def _run_spotter(self) -> None:
+        last = 0.0
+        while True:
+            block = self._kws_blocks.get()
+            now = time.time()
+            if now - last > 1.0:
+                self.spotter.reset()  # a gap (muted while it talked): don't join old sound to new
+            last = now
+            try:
+                hits = self.spotter.feed(block)
+            except Exception as e:  # never take the ears down with it
+                print(f"(wake words: {e})")
+                hits = []
+            for phrase in hits:
+                self.keyword_hits.append((now, phrase))
+                if self.on_keyword is not None:
+                    self.on_keyword(phrase, now)
 
     def start(self) -> str:
         """Start the worker and try to open the Mac mic. A missing Mac mic
@@ -415,6 +486,8 @@ class Ears:
         failure is recorded in mac_error and start() still succeeds."""
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
+        if self.spotter is not None:
+            threading.Thread(target=self._run_spotter, daemon=True).start()
         if config.MIC_SOURCE == "robot":
             # Robot mic only: don't open the computer's mic at all.
             self.source = "robot"
@@ -459,6 +532,7 @@ class Ears:
             block = np.clip(indata.sum(axis=1), -1.0, 1.0)
             self.level = float(np.sqrt(np.mean(block * block)))
             self._blocks.put(block)
+            self._to_spotter(block)
 
     def _run(self) -> None:
         segmenter = self._segmenter
@@ -487,6 +561,11 @@ class Ears:
                     text = second
             if text:
                 self.on_utterance(text, segmenter.started_at, segmenter.ended_at)
+            t0, t1 = segmenter.started_at, segmenter.ended_at
+            self._recorder.save(utterance, {
+                "started_at": round(t0, 3), "ended_at": round(t1, 3), "seconds": round(len(utterance) / SAMPLE_RATE, 2),
+                "engine": config.STT_ENGINE, "text": text, "turn": segmenter.last_decision,
+                "keywords": [p for at, p in self.keyword_hits if t0 - 0.5 <= at <= t1 + 1.5]})
             if self._compare is not None:
                 try:
                     self._compare[2].put_nowait((utterance, text))

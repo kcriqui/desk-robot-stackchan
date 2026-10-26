@@ -743,7 +743,7 @@ void setup() {
   applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.18 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.23 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN

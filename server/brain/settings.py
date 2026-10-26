@@ -52,6 +52,12 @@ SCHEMA: dict[str, dict[str, tuple]] = {
         "brightness":    ("LED_BRIGHTNESS", "int", (0, 100)),
         "asleep":        ("LED_ASLEEP", "choice", ("off", "glow")),
     },
+    "wake": {
+        "engine":        ("WAKE_ENGINE", "choice", ("brain", "robot")),  # who listens for the wake word
+        "words":         ("WAKE_WORDS", "str", 160),     # comma-separated: wake whoever is in use
+        "record":        ("RECORD_UTTERANCES", "bool", None),  # keep every utterance (data/recordings)
+        "spotter":       ("KWS_ENABLED", "bool", None),  # the keyword spotter too, not just the transcript
+    },
     "listening": {
         "VAD_THRESHOLD":    ("VAD_THRESHOLD", "float", (0.1, 0.95)),
         "TURN_THRESHOLD":   ("TURN_THRESHOLD", "float", (0.1, 0.95)),

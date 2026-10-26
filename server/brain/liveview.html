@@ -334,7 +334,10 @@
             <div>
               <div class="set"><label class="k" for="c-name">Name</label>
                 <input type="text" id="c-name" maxlength="24" autocomplete="off" spellcheck="false" placeholder="Juniper">
-                <p class="hint">What the robot is called while being them. The wake word doesn't change.</p></div>
+                <p class="hint">What the robot is called while being them.</p></div>
+              <div class="set"><label class="k" for="c-wake">Wake words</label>
+                <input type="text" id="c-wake" maxlength="200" autocomplete="off" spellcheck="false" placeholder="hey juniper, captain juniper">
+                <p class="hint">Comma-separated, up to 6. Saying one wakes the robot as them. Write them as they sound: \u201chey glad us\u201d finds GLaDOS. Empty = \u201chey\u201d and the name.</p></div>
               <div class="set"><label class="k" for="c-pron">Pronouns</label>
                 <select id="c-pron"><option value="he">he / him</option><option value="she">she / her</option><option value="they">they / them</option><option value="it">it / its</option></select>
                 <p class="hint">Told to the language model, and used for the wording on this page.</p></div>
@@ -661,6 +664,12 @@
       ["robot", "power_bank", "On a USB power bank", "sleeps deeply on USB too; powers off only if the pack runs out and its battery is below half", "check"],
       ["robot", "near_level", "Near means", "", "number"],
     ]],
+    ["Wake words", "each personality has its own too", [
+      ["wake", "engine", "Who listens", "the brain: every personality's wake words, and they switch to it (the robot streams its mic while asleep); the robot: \u201cComputer\u201d only, and no audio while it sleeps", "select:brain=the brain,robot=the robot"],
+      ["wake", "words", "For any personality", "comma-separated, written as they sound; they wake whoever is in use", "text"],
+      ["wake", "spotter", "Keyword spotter too", "opens its eyes mid-sentence; off: on your voice it caught 5 of 14 wake words and misfired on ordinary speech. The transcript wakes it either way", "check"],
+      ["wake", "record", "Keep recordings", "every utterance, in server/data/recordings, for tuning the wake words and comparing speech-to-text (kept here only)", "check"],
+    ]],
     ["Clock screen", "while it sleeps on USB", [
       ["clock", "h24", "24-hour clock", "", "check"],
       ["clock", "timezone", "Time zone", "", "zone"],
@@ -883,7 +892,8 @@
     cstate.sel = c.id; cstate.isNew = false;
     for (const b of $("charlist").children) b.setAttribute("aria-pressed", b.dataset.id === c.id);
     $("chartitle").textContent = c.character.name;
-    $("chardesc").textContent = c.builtin ? c.character.description + ". Duplicate him to make one of your own from his." : "";
+    $("chardesc").textContent = c.builtin ? c.character.description + ". Wake words: " + (c.character.wake_words || []).join(", ") +
+      ". Duplicate him to make one of your own from his." : "";
     $("charactions").hidden = false;
     $("charuse").disabled = c.id === cstate.active; $("charuse").textContent = c.id === cstate.active ? "In use" : "Use this personality";
     $("chardelete").hidden = c.builtin;
@@ -893,7 +903,7 @@
   }
   function blankChar() {
     return { name: "", pronouns: "they", description: "", identity: "", style: "", emotions: "", examples: [], leads: {}, lines: {},
-             voice: { piper: cstate.meta.default_voice }, face: "" };
+             voice: { piper: cstate.meta.default_voice }, face: "", wake_words: [] };
   }
   function newChar() {
     if (!confirmCharDiscard()) return;
@@ -906,6 +916,7 @@
   function fillCharForm(ch) {
     cstate.saved = JSON.parse(JSON.stringify(ch));
     $("c-name").value = ch.name; $("c-desc").value = ch.description || ""; $("c-pron").value = ch.pronouns || "they";
+    $("c-wake").value = (ch.wake_words || []).join(", ");
     $("c-identity").value = ch.identity || ""; $("c-style").value = ch.style || ""; $("c-emotions").value = ch.emotions || "";
     $("c-examples").value = (ch.examples || []).join("\n");
     for (const i of document.querySelectorAll("[id^=c-l-]")) { const k = i.id.slice(4); i.value = (k === "search" || k === "dance" ? ch.leads?.[k] : ch.lines?.[k]) || ""; }
@@ -928,7 +939,8 @@
     }
     return { name: $("c-name").value.trim(), pronouns: $("c-pron").value, description: $("c-desc").value.trim(), identity: $("c-identity").value.trim(),
              style: $("c-style").value.trim(), emotions: $("c-emotions").value.trim(),
-             examples: $("c-examples").value.split("\n").map(l => l.trim()).filter(Boolean), leads, lines, voice, face: $("c-face").value };
+             examples: $("c-examples").value.split("\n").map(l => l.trim()).filter(Boolean), leads, lines, voice, face: $("c-face").value,
+             wake_words: $("c-wake").value.split(",").map(w => w.trim()).filter(Boolean) };
   }
   function markCharDirty(on) {
     cstate.dirty = on;

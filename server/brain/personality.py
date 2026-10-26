@@ -63,6 +63,8 @@ class Character:
     voice: dict = field(default_factory=dict)   # Piper settings; {} = config.PIPER_VOICE as tuned in config.py
     face: str = ""                              # a face pack id; "" = config.FACE_PACK
     pronouns: str = "they"                      # one of PRONOUNS: for the model, and the live view's wording
+    # Phrases that wake the robot as this character, written as they sound (wakewords.py); [] = "hey <name>".
+    wake_words: list[str] = field(default_factory=list)
 
 
 # Who they are to others: (subject, object, possessive).
@@ -76,6 +78,7 @@ ROCKY = Character(
     id="rocky",
     name="Rocky",
     pronouns="he",
+    wake_words=["hey rocky", "rocky chan", "hey rocky chan"],
     description="the Eridian engineer from Project Hail Mary (built in)",
     identity="""You are Rocky, the Eridian engineer from Project Hail Mary, now living as a small desk robot \
 on your human's desk.{rename} Your human is {human}: your partner and crewmate, the way Grace was before he \
@@ -242,7 +245,7 @@ The tag sets your face while you speak. {c.emotions}"""
 
 def name(c: Character | None = None) -> str:
     """What the robot is called while being this character (the active one by default): Rocky goes by
-    ROBOT_NAME (e.g. RockyChan), anyone else by their own name. The wake word doesn't change."""
+    ROBOT_NAME (e.g. RockyChan), anyone else by their own name. Each has its own wake words (wake_words())."""
     c = c or CHARACTER
     return config.ROBOT_NAME if c.id == ROCKY.id else c.name
 
@@ -342,6 +345,14 @@ def parse(char_id: str, d) -> Character:
     pronouns = d.get("pronouns") or "they"
     if pronouns not in PRONOUNS:
         raise ValueError(f"{char_id}: pronouns are {', '.join(PRONOUNS)}")
+    wake = d.get("wake_words") or []
+    if isinstance(wake, str):
+        wake = wake.split(",")
+    if not isinstance(wake, list) or not all(isinstance(w, str) for w in wake):
+        raise ValueError(f"{char_id}: wake_words must be a list of phrases")
+    wake = list(dict.fromkeys(" ".join(w.lower().split()) for w in wake if w.strip()))
+    if len(wake) > 6 or any(len(w) > 32 or not re.fullmatch(r"[a-z' ]+", w) for w in wake):
+        raise ValueError(f"{char_id}: wake words are up to 6 phrases of letters and spaces, 32 characters each")
     voice = dict(d.get("voice", {}))
     if voice:
         if voice.get("piper") not in config.PIPER_VOICES:
@@ -364,14 +375,21 @@ def parse(char_id: str, d) -> Character:
     return Character(id=char_id, name=name, description=text("description", False, 1000),
                      identity=text("identity"), style=text("style", False), emotions=text("emotions", False, 1000),
                      examples=[e.strip() for e in examples], leads=leads, lines=lines,
-                     voice=voice, face=text("face", False, 80), pronouns=pronouns)
+                     voice=voice, face=text("face", False, 80), pronouns=pronouns, wake_words=wake)
 
 
 def to_dict(c: Character) -> dict:
     """A character as its file holds it."""
     return {"name": c.name, "pronouns": c.pronouns, "description": c.description, "identity": c.identity, "style": c.style,
             "emotions": c.emotions, "examples": c.examples, "leads": c.leads, "lines": c.lines,
-            "voice": c.voice, "face": c.face}
+            "voice": c.voice, "face": c.face, "wake_words": c.wake_words}
+
+
+def wake_words(c: Character | None = None) -> list[str]:
+    """What wakes the robot as this character (the active one by default): its own phrases, or "hey <name>"."""
+    c = c or CHARACTER
+    plain = " ".join(re.sub(r"[^a-z' ]+", " ", c.name.lower()).split())
+    return c.wake_words or [f"hey {plain}"]
 
 
 def _face_first(line: str) -> str:

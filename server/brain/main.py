@@ -44,7 +44,7 @@ import time
 
 import websockets
 
-from . import alerts, battery, clock, config, faces, logbook, mouth, personality, settings, weather, web
+from . import alerts, battery, clock, config, faces, kws, logbook, mouth, personality, settings, wakewords, weather, web
 from .body import Body
 from .dance import Dancer, length as dance_length
 from .memories import Memories
@@ -67,6 +67,14 @@ _bad_token = asyncio.Lock()  # wrong tokens wait out their second one at a time:
 # when WAKE_ON_ROBOT allows it; None = the brain listens for his name.
 robot_wake_word: str | None = None
 robot_woke_at = 0.0  # when the robot last heard it; 0 once a transcript settled it
+robot_offered_wake = ""  # the robot's own wake word (its hello), whether or not it's the one in use
+# The brain's wake words (config.WAKE_ENGINE "brain"): the spotter (kws.Spotter, None without the model), which
+# phrases it listens for and whose they are, the last one it heard (when, phrase), and when it woke the robot
+# from sleep (0 once a transcript settled it).
+spotter = None
+wake_table: list[wakewords.Entry] = []
+kw_hit: tuple[float, str] | None = None
+kw_woke_at = 0.0
 brain: RobotBrain | None = None  # created in main() once the event loop exists
 ears: Ears | None = None
 # (text, when speech began, when it ended, when the transcript was ready)
@@ -211,7 +219,12 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     powered_off = None
     robot_deep_sleep = False
     offered = str(hello.get("wake") or "").strip().lower()
-    robot_wake_word = offered if offered and config.WAKE_ON_ROBOT else None
+    global robot_offered_wake
+    robot_offered_wake = offered
+    robot_wake_word = _robot_wakes()
+    if robot_wake_word is None:
+        print(f"wake words: the brain listens for {', '.join(repr(e.phrase) for e in wake_table)}"
+              f"{' (spotter on)' if spotter is not None and config.KWS_ENABLED else ''}; asleep, the robot streams its mic")
     if robot_wake_word:
         print(f"wake word: the robot listens for \"{robot_wake_word}\" itself; asleep, it sends no audio")
         global awake_until
@@ -1111,6 +1124,7 @@ def console_state() -> dict:
         "face_pack": face_pack if config.BODY == "stackchan" else None,
         "face_packs": [p["id"] for p in face_packs()] if config.BODY == "stackchan" else [],
         "wake_word": robot_wake_word,  # the robot's own ("computer"), or None: his name wakes him
+        "wake_words": [{"phrase": e.phrase, "owner": e.owner} for e in wake_table] if robot_wake_word is None else [],
         "powered_off": ({"why": powered_off[0], "at": time.strftime("%H:%M", time.localtime(powered_off[1]))}
                         if powered_off is not None and robot_socket is None else None),
         "memories": [{"id": f.id, "text": f.text, "added": f.added, "until": f.until} for f in memories.facts()],
@@ -1229,7 +1243,7 @@ async def _console_command(action: str, payload: dict) -> dict:
     elif action == "character_save":
         cid = payload.get("id") or None
         cid = personality.save(payload.get("character"), cid)
-        characters(fresh=True)
+        refresh_wake_words()
         print(f"console: saved character {cid}")
         if cid == personality.CHARACTER.id:
             await use_character(cid)  # the changes apply now
@@ -1239,7 +1253,7 @@ async def _console_command(action: str, payload: dict) -> dict:
     elif action == "character_delete":
         cid = str(payload.get("id", ""))
         personality.delete(cid)
-        characters(fresh=True)
+        refresh_wake_words()
         print(f"console: deleted character {cid}")
         if cid == personality.CHARACTER.id:
             await use_character(personality.ROCKY.id)
@@ -1326,8 +1340,20 @@ async def start_listening() -> None:
     global ears
     loop = asyncio.get_running_loop()
     print(await loop.run_in_executor(None, mouth.prepare))
-    stt = f"Moonshine {config.MOONSHINE_MODEL}" if config.STT_ENGINE == "moonshine" else config.STT_MODEL
+    stt = {"moonshine": f"Moonshine {config.MOONSHINE_MODEL}", "parakeet": "Parakeet TDT 0.6B"}.get(
+        config.STT_ENGINE, f"Whisper {config.STT_MODEL}")
     print(f"loading speech model {stt} and the turn-taking models (first run downloads them)...")
+    global spotter
+    if spotter is None and kws.available():
+        try:
+            spotter = await loop.run_in_executor(None, kws.Spotter)
+            refresh_wake_words()
+            if robot_socket is not None:
+                await apply_wake_engine()  # it connected while the spotter loaded, and the robot took the waking
+        except Exception as e:  # the transcript alone wakes it, as before
+            print(f"(wake words: the spotter didn't start: {e})")
+    elif spotter is None:
+        print(f"(wake words: no keyword model in {config.KWS_MODEL_DIR}; the transcript alone wakes it)")
     try:
         ears = await loop.run_in_executor(
             None,
@@ -1336,16 +1362,20 @@ async def start_listening() -> None:
                     heard.put_nowait, (text, t0, t1, time.time())
                 ),
                 on_speech_start=lambda: loop.call_soon_threadsafe(speech_started.set),
+                spotter=spotter,
+                on_keyword=lambda phrase, at: loop.call_soon_threadsafe(
+                    lambda: asyncio.create_task(on_wake_phrase(phrase, at))),
             ),
         )
         # Asleep or out of awake time, he needs his name to answer. When the
         # robot does the waking, only audio after its wake word arrives, and
         # the first transcript must contain that word (_handle_heard); the
         # ears double-check it with Whisper when Moonshine missed it.
-        ears.wake_needed = lambda: bool(robot_woke_at) or (
+        ears.wake_needed = lambda: bool(robot_woke_at or kw_woke_at) or (
             robot_wake_word is None and time.time() >= awake_until)
         ears.has_wake_word = lambda text: (
-            _robot_wake_word_in(text) is not None if robot_woke_at else strip_wake_word(text)[0])
+            _robot_wake_word_in(text) is not None if robot_woke_at else
+            strip_wake_word(text)[0] or wakewords.match(text, _phrases(), loose=bool(kw_woke_at)) is not None)
         mic = await loop.run_in_executor(None, ears.start)
     except Exception as e:
         ears = None
@@ -1403,6 +1433,11 @@ async def doze_loop() -> None:
             await back_to_sleep("the robot woke, but nothing followed")
             was_awake = False
             continue
+        if kw_woke_at and time.time() - kw_woke_at > config.ROBOT_WAKE_GRACE_SECONDS and not (
+                ears is not None and ears.hearing):
+            await back_to_sleep("a wake phrase was heard, but nothing followed")
+            was_awake = False
+            continue
         now = time.time()
         if awake_until - now > 5:
             held_since = 0.0  # a transcript restarted the clock: no hold in progress
@@ -1417,7 +1452,7 @@ async def doze_loop() -> None:
             continue
         awake = now < awake_until
         if was_awake and not awake:
-            print(f"({personality.name()} dozed off — say \"hey {config.ROBOT_NAME}\" to wake {personality.pronoun(1)})")
+            print(f"({personality.name()} dozed off — say \"{_wake_hint()}\" to wake {personality.pronoun(1)})")
             await set_asleep(True)
             await set_head_held(False)  # idle life resumes; the head may wander again
         was_awake = awake
@@ -1453,6 +1488,60 @@ async def on_robot_wake(word: str) -> None:
             tracker.note_pose(tilt=config.TILT_WAKE)
 
 
+def _phrases() -> list[str]:
+    return [e.phrase for e in wake_table]
+
+
+def _robot_wakes() -> str | None:
+    """The robot's own wake word when it's the one listening (config.WAKE_ENGINE "robot"), else None: the robot
+    then streams its mic while asleep too, and the brain wakes on the transcript (and the spotter, if on)."""
+    use = config.WAKE_ON_ROBOT and config.WAKE_ENGINE == "robot"
+    return robot_offered_wake if robot_offered_wake and use else None
+
+
+def _wake_hint() -> str:
+    return config.ROBOT_WAKE_WORD if robot_wake_word else personality.wake_words()[0]
+
+
+def refresh_wake_words() -> None:
+    """Rebuild the wake phrases from every personality and config.WAKE_WORDS, and give them to the spotter."""
+    global wake_table
+    chars = characters(fresh=True)
+    wake_table = wakewords.table([(c.id, personality.wake_words(c)) for c in chars])
+    if spotter is not None:
+        spotter.set_phrases(_phrases() if config.KWS_ENABLED else [])  # none: it decodes nothing
+    # Whisper is told the names to expect (its initial prompt): every personality's, as they're written.
+    names = list(dict.fromkeys(personality.name(c) for c in chars))
+    config.STT_PROMPT = f"Hey {names[0]}. A desk robot that answers to {', '.join(names)}, or Computer."
+
+
+async def apply_wake_engine() -> None:
+    """The Settings tab switched who listens for the wake word: tell the robot whether to stream while asleep."""
+    global robot_wake_word
+    robot_wake_word = _robot_wakes()
+    if robot_socket is not None and robot_offered_wake:
+        await send_to_robot({"type": "wake_word", "on": bool(robot_wake_word)})
+    print(f"wake words: {'the robot listens for ' + repr(robot_wake_word) if robot_wake_word else 'the brain listens'}")
+
+
+async def on_wake_phrase(phrase: str, at: float) -> None:
+    """The spotter heard a wake phrase (any time, even mid-sentence). Asleep, the eyes open now; the transcript
+    then confirms it (_handle_heard), switches to its personality, or it was a false wake and it sleeps again."""
+    global kw_hit, kw_woke_at, awake_until
+    if robot_wake_word is not None or speaking_reply is not None:
+        return  # the robot does the waking; or it's hearing itself
+    kw_hit = (at, phrase)
+    owner = wakewords.owner(wake_table, phrase)
+    print(f"(wake phrase heard: \"{phrase}\"{f' ({owner})' if owner else ''})")
+    if robot_asleep and not kw_woke_at:
+        # Eyes open now; the head doesn't move until you've finished (_handle_heard tilts it up): its servos are
+        # loud enough to muddle the rest of your sentence for speech-to-text.
+        kw_woke_at = time.time()
+        awake_until = time.time() + config.AWAKE_SECONDS
+        await set_asleep(False)
+        await send_to_robot({"type": "emotion", "name": "surprised"})
+
+
 def on_robot_hush() -> None:
     """A hand over the robot's sensor stopped it mid-reply (it has already stopped its speaker): drop the rest of
     the reply, as when you talk over it, and stay awake to listen."""
@@ -1465,9 +1554,10 @@ def on_robot_hush() -> None:
 
 async def back_to_sleep(why: str) -> None:
     """A false wake: eyes shut again, no announcement."""
-    global awake_until, robot_woke_at
+    global awake_until, robot_woke_at, kw_woke_at
     print(f"({why}: back to sleep)")
     robot_woke_at = 0.0
+    kw_woke_at = 0.0
     awake_until = 0.0
     await send_to_robot({"type": "emotion", "name": "neutral"})
     await set_asleep(True)
@@ -1578,6 +1668,10 @@ async def change_setting(section: str, key: str, value) -> dict:
         await send_screen()
     elif section == "listening" and ears is not None:
         ears.apply_config()
+    elif section == "wake" and key in ("words", "spotter"):
+        refresh_wake_words()
+    elif section == "wake" and key == "engine":
+        await apply_wake_engine()
     return {"value": value, **({"place": str(place)} if place else {})}
 
 
@@ -1691,9 +1785,17 @@ def _robot_wake_word_in(text: str) -> re.Match | None:
 
 async def _handle_heard(item: tuple[str, float, float, float]) -> None:
     global awake_until
-    global robot_woke_at
+    global robot_woke_at, kw_hit, kw_woke_at
     text, started_at, ended_at, heard_at = item
     woke, question = strip_wake_word(text)
+    # The brain's wake words: did the spotter hear one during this turn, and does the transcript start with it
+    # (loosely when it did: "hey Gladys" is GLaDOS)? A phrase of another personality switches to it.
+    hit = kw_hit if kw_hit and started_at - 1.0 <= kw_hit[0] <= ended_at + 2.0 else None
+    spotter_woke = bool(kw_woke_at) and hit is not None
+    if hit:
+        kw_hit = None
+        kw_woke_at = 0.0
+    found = wakewords.match(text, _phrases(), loose=hit is not None) if robot_wake_word is None and wake_table else None
     if robot_woke_at:
         # The first thing heard after the robot's wake word must contain it
         # (the robot sends the audio from just before it). The question is
@@ -1705,6 +1807,19 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
             return
         # The question is what follows, without the word again ("Computer computer, ...").
         woke, question = True, strip_leading_word(text[m.end():], config.ROBOT_WAKE_WORD, loose=True)
+    elif found:
+        phrase, question = found
+        woke = True
+        owner = wakewords.owner(wake_table, phrase)
+        if owner and owner != personality.CHARACTER.id:
+            try:
+                name = await use_character(owner)
+                print(f"(\"{phrase}\": now {name})")
+            except ValueError as e:
+                print(f"(\"{phrase}\" is {owner}'s, who didn't load: {e})")
+    elif spotter_woke:
+        await back_to_sleep(f"heard \"{hit[1]}\", but \"{text}\" doesn't start with it")
+        return
     elif robot_wake_word:
         # Already awake, "Computer, what's ...": the model needn't hear the word, and "Computer" alone is a bare
         # wake ("Question?"), not a question about computers.

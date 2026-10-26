@@ -2,12 +2,12 @@
 
 import unittest
 
-from brain import config, moonshine
+from brain import config, moonshine, parakeet
 
 
 class SttTests(unittest.TestCase):
     def test_engine_settings(self):
-        self.assertIn(config.STT_ENGINE, ("whisper", "moonshine"))
+        self.assertIn(config.STT_ENGINE, ("parakeet", "whisper", "moonshine"))
         self.assertIn(config.MOONSHINE_MODEL, moonshine.FILES)
         self.assertGreaterEqual(config.TURN_THREADS, 1)
 
@@ -19,6 +19,12 @@ class SttTests(unittest.TestCase):
             self.assertEqual(set(files), {"encoder_model.onnx", "decoder_model_merged.onnx"})
             for sha in files.values():
                 self.assertRegex(sha, r"^[0-9a-f]{64}$")
+
+    def test_parakeet_files_are_pinned(self):
+        self.assertRegex(parakeet.REVISION, r"^[0-9a-f]{40}$")
+        self.assertEqual(set(parakeet.FILES), {"encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"})
+        for sha in parakeet.FILES.values():
+            self.assertRegex(sha, r"^[0-9a-f]{64}$")
 
 
 class CollapseRepeatsTests(unittest.TestCase):
