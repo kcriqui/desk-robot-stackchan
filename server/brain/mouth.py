@@ -15,8 +15,7 @@ Three voices (config.TTS_ENGINE picks; "auto" takes the first available):
 
 `stream(text)` yields 16 kHz mono s16le PCM chunks — the exact format the
 robot's speaker expects (docs/protocol.md) — as they're produced.
-`synthesize()` is the same joined into one buffer; `play()` plays a buffer
-on this computer.
+`play()` plays a buffer on this computer (no robot connected).
 """
 
 from __future__ import annotations
@@ -484,11 +483,6 @@ def sample_wav(text: str, character) -> bytes:
     return buf.getvalue()
 
 
-def synthesize(text: str) -> bytes:
-    """Rocky's reply as one 16 kHz mono signed 16-bit little-endian PCM buffer."""
-    return b"".join(stream(text))
-
-
 def _save_clip(pcm: bytes, text: str) -> None:
     """Keep recent clips on disk so a weird one can be inspected."""
     try:
@@ -511,8 +505,7 @@ def _save_clip(pcm: bytes, text: str) -> None:
 
 
 def normalize(pcm: bytes, peak: float = 0.95) -> bytes:
-    """Scale so the loudest sample hits `peak` of full scale. Used for the
-    built-in fallback voice, which arrives all at once."""
+    """Scale so the loudest sample hits `peak` of full scale (the live view's voice samples)."""
     samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
     top = float(np.abs(samples).max()) if len(samples) else 0.0
     if top < 1:
@@ -546,8 +539,3 @@ def play(pcm: bytes) -> None:
         os.unlink(path)
 
 
-def speak(text: str) -> bytes:
-    """Synthesize and play on this computer; returns the PCM for the robot too."""
-    pcm = synthesize(text)
-    play(pcm)
-    return pcm

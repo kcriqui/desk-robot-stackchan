@@ -57,12 +57,10 @@ settle. The server takes either type.
 {"type": "speak_begin", "bytes": 0}      // binary TTS audio frames follow; bytes = total if known, 0 = streaming (robot starts after 200 ms of audio)
 {"type": "speak_end"}             // no more audio; robot replies speak_done when played out
 {"type": "volume", "level": 0.4}  // speaker volume 0.0-1.0
-{"type": "asleep", "on": true}    // eyes shut + Z's; false = wake up. Asleep = no idle glances;
-                                  // firmware-stackchan also pauses the camera stream and dims the screen
+{"type": "asleep", "on": true}    // eyes shut + Z's; false = wake up. firmware-stackchan also pauses the camera stream and dims the screen
                                   // (sent on connect too, so both sides agree)
 {"type": "wake_word", "on": true} // robot-side waking: asleep, the mic sends nothing and the
                                   // robot listens for its wake word itself (sends "wake")
-{"type": "glance", "on": false}   // allow/forbid the firmware's idle head glances; the server sends off on connect and leaves them off
 {"type": "mic", "on": true}       // stream the microphone to the server
 {"type": "stream", "on": true, "fps": 10}   // start/stop the camera stream, set rate
 {"type": "face", "save": true, "pack": {...}}  // firmware-stackchan 0.6.1+: a face pack (server/faces/*.json,

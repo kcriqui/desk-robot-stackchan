@@ -1,6 +1,7 @@
 #include "camera.h"
 
 #include <M5Unified.h>
+#include <freertos/idf_additions.h>
 #include <esp_camera.h>
 #include <img_converters.h>
 
@@ -60,7 +61,8 @@ bool Camera::begin() {
   ok_ = latest_ != nullptr;
   // Core 0 at low priority: encoding is the heaviest thing on the robot, and
   // the face animation on core 1 shouldn't stutter for it.
-  if (ok_) xTaskCreatePinnedToCore(taskEntry, "camera", 6144, this, 1, nullptr, 0);
+  // Its stack in PSRAM, like the frames: internal RAM is what the robot runs short of.
+  if (ok_) xTaskCreatePinnedToCoreWithCaps(taskEntry, "camera", 6144, this, 1, nullptr, 0, MALLOC_CAP_SPIRAM);
   return ok_;
 }
 

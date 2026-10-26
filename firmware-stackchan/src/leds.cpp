@@ -45,7 +45,7 @@ void Leds::setDance(bool on, uint32_t nowMs) {
   danceStep_ = UINT32_MAX;
 }
 
-void Leds::beat(uint32_t) { colour_ = (colour_ + 1) % 6; }
+void Leds::beat() { colour_ = (colour_ + 1) % 6; }
 
 void Leds::test(uint32_t nowMs) { testAt_ = nowMs | 1; }
 

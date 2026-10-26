@@ -310,14 +310,6 @@ void Face::setAsleep(bool on) {
   }
 }
 
-void Face::lookToward(float x, float y, uint32_t holdMs) {
-  pupilTargetX_ = constrain(x, -1.0f, 1.0f);
-  pupilTargetY_ = constrain(y, -1.0f, 1.0f);
-  gazeTargetX_ = pupilTargetX_ * 6.0f;   // the whole eye leans that way a little too
-  gazeTargetY_ = pupilTargetY_ * 3.0f;
-  nextPupilMs_ = nextSaccadeMs_ = millis() + holdMs;
-}
-
 void Face::setTalking(bool on, float level) {
   talking_ = on;
   mouthLevel_ = constrain(level, 0.0f, 1.0f);
@@ -481,11 +473,6 @@ void Face::dot(int x, int y, uint8_t ink) {
   if (x < 0 || y < 0 || x >= SCREEN_W || y >= SCREEN_H) return;
   int sx = lroundf(x * S), sy = lroundf(y * S);
   gfx_.fillRect(sx, sy, lroundf((x + 1) * S) - sx, lroundf((y + 1) * S) - sy, ink);
-}
-
-void Face::rect(int x, int y, int w, int h, uint8_t ink) {
-  int sx = lroundf(x * S), sy = lroundf(y * S);
-  gfx_.fillRect(sx, sy, lroundf((x + w) * S) - sx, lroundf((y + h) * S) - sy, ink);
 }
 
 void Face::roundBox(float x, float y, float w, float h, float r, uint8_t ink) {

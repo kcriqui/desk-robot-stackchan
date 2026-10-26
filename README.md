@@ -270,13 +270,14 @@ body is even built.
 
 ### Rename the robot
 
-`ROBOT_NAME` in `server/brain/config.py`. The wake word becomes "hey
-<name>" and the sleep phrases and speech-to-text hint follow automatically.
-Update `WAKE_PHRASES` in the same file with the ways speech-to-text tends
-to mishear the new name (say it a few times and watch the console). The
-character file still introduces itself as Rocky, so edit
-`server/brain/personality.py` too, or you have a robot called Bolt who
-insists he is Rocky.
+`ROBOT_NAME` (and `ROBOT_ALIASES`) in `server/.env`. Rocky's wake words
+become "hey <name>" and the name itself, and the sleep phrases and
+speech-to-text hint follow automatically. Add the ways speech-to-text tends
+to mishear the new name to `ROCKY.wake_words` in `server/brain/personality.py`
+(say it a few times and watch the console). The character still introduces
+itself as Rocky, so edit the rest of `ROCKY` there too, or you have a robot
+called Bolt who insists he is Rocky. Other personalities have their own
+names and wake words, set in the live view's Personalities tab.
 
 ### Change the character
 

@@ -1,6 +1,7 @@
 #include "speaker.h"
 
 #include <M5Unified.h>
+#include <freertos/idf_additions.h>
 
 #include "mic.h"
 
@@ -29,7 +30,8 @@ void Speaker::begin(Mic* mic, float volume, DoneHandler onDone) {
     ringSize_ = RING_BYTES;
   }
 
-  xTaskCreatePinnedToCore(taskEntry, "speaker", 4096, this, 3, nullptr, 0);
+  // Stack and buffers in PSRAM: internal RAM is what the robot runs short of.
+  xTaskCreatePinnedToCoreWithCaps(taskEntry, "speaker", 4096, this, 3, nullptr, 0, MALLOC_CAP_SPIRAM);
 }
 
 void Speaker::setVolume(float v) {
@@ -57,10 +59,10 @@ void Speaker::feed(const uint8_t* pcm, size_t len) {
   size_t used = (head_ + ringSize_ - tail_) % ringSize_;
   size_t space = ringSize_ - 1 - used;
   if (len > space) len = space;  // drop the tail rather than wrap over unread audio
-  for (size_t i = 0; i < len; ++i) {
-    ring_[head_] = pcm[i];
-    head_ = (head_ + 1) % ringSize_;
-  }
+  size_t first = min(len, ringSize_ - head_);  // up to the end of the ring, then the rest from its start
+  memcpy(ring_ + head_, pcm, first);
+  memcpy(ring_, pcm + first, len - first);
+  head_ = (head_ + len) % ringSize_;
   portEXIT_CRITICAL(&lock_);
 }
 
@@ -84,7 +86,14 @@ size_t Speaker::readInto(uint8_t* out, size_t maxLen) {
 void Speaker::taskEntry(void* self) { static_cast<Speaker*>(self)->task(); }
 
 void Speaker::task() {
-  static int16_t chunks[NUM_CHUNKS][CHUNK_SAMPLES];
+  const size_t size = sizeof(int16_t) * NUM_CHUNKS * CHUNK_SAMPLES;
+  void* mem = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
+  if (mem == nullptr) mem = heap_caps_malloc(size, MALLOC_CAP_INTERNAL);  // no PSRAM to spare: as before
+  if (mem == nullptr) {
+    Serial.println(F("speaker: no memory for its buffers"));
+    vTaskDelete(nullptr);
+  }
+  auto chunks = static_cast<int16_t(*)[CHUNK_SAMPLES]>(mem);
   int chunk = 0;
   bool started = false;
   bool haveBus = false;

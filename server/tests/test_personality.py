@@ -20,8 +20,18 @@ class CharacterTests(unittest.TestCase):
 
     def test_voice_settings(self):
         self.assertEqual(len(config.TTS_VOICE_ID), 32)
-        self.assertIn(f"hey {config.ROBOT_NAME.lower()}", config.WAKE_PHRASES)
         self.assertIn(config.ROBOT_NAME, config.STT_PROMPT)
+
+    def test_rockys_wake_words_follow_his_names(self):
+        from brain import wakewords
+        words = personality.wake_words(personality.ROCKY)
+        for n in config.NAMES:  # ROBOT_NAME's and the aliases' spoken forms
+            self.assertIn(f"hey {n}", words)
+            self.assertIn(n, words)
+        self.assertIn("hey ricky", words)  # and what speech-to-text hears for "hey Rocky"
+        name = config.NAMES[-1]
+        self.assertEqual(wakewords.match(f"{name.title()}, what time is it?", words), (name, "what time is it?"))
+        self.assertIsNone(wakewords.match(f"I told {name.title()} about it", words))
 
 
 class CharacterFileTests(unittest.TestCase):

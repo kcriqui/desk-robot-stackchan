@@ -17,8 +17,11 @@
 
 class Wake {
  public:
-  // Loads `model` from the partition. False if it isn't there.
+  // Checks `model` is in the partition (false if not); start() loads it.
   bool begin(const char* partition, const char* model);
+  // The engine itself (~33 KB of internal RAM): started the first time the brain asks the robot to do the waking,
+  // then kept till the next boot. True once running.
+  bool start();
   bool ready() const { return afe_ != nullptr; }
   const char* word() const { return word_; }
   const char* status() const { return status_; }  // why it isn't ready, or "ok"
@@ -51,6 +54,8 @@ class Wake {
 
   const void* iface_ = nullptr;  // const esp_afe_sr_iface_t*
   void* afe_ = nullptr;          // esp_afe_sr_data_t*
+  void* models_ = nullptr;       // srmodel_list_t*: the partition's models (begin)
+  char model_[40] = "";
   StreamBufferHandle_t in_ = nullptr;
   int chunk_ = 0;  // samples per feed
   char word_[24] = "";

@@ -23,7 +23,7 @@ class Leds {
   void alert(Alert a, uint32_t nowMs);
   void setDance(bool on, uint32_t nowMs);
   bool dancing() const { return dance_; }
-  void beat(uint32_t nowMs);          // a dance move: the next colour
+  void beat();                        // a dance move: the next colour
   void test(uint32_t nowMs);          // one LED at a time, 0 to 11, to see which is where
   void printStatus() const;
 

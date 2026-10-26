@@ -32,6 +32,7 @@ import numpy as np
 
 from . import config
 from .turn import VAD_CHUNK, SileroVAD, SmartTurn
+from .wakewords import clean
 
 SAMPLE_RATE = 16_000
 BLOCK_SECONDS = 0.03  # 30 ms per mic block
@@ -243,11 +244,8 @@ class _OneAtATime:
             return self._t.transcribe(audio)
 
 
-_WAKE_CLEAN = re.compile(r"[^a-z' ]+")
-
-
 def normalize(text: str) -> str:
-    return " ".join(_WAKE_CLEAN.sub(" ", text.lower()).split())
+    return clean(text)
 
 
 # Words that can surround a spoken command without turning it into a
@@ -286,19 +284,6 @@ def is_command(norm: str, phrases: list[str], extra: int = 2) -> bool:
     return False
 
 
-def _wake_pattern() -> re.Pattern:
-    # "hey rocky" -> matches "Hey, Rocky!" etc.: any punctuation/space between
-    # the words, case-insensitive, and swallows the punctuation after it.
-    alts = "|".join(r"\W+".join(map(re.escape, p.split())) for p in config.WAKE_PHRASES)
-    return re.compile(rf"\b(?:{alts})\b[\s,.!?:;-]*", re.IGNORECASE)
-
-
-_WAKE_RE = _wake_pattern()
-# A name alone, only as the first word (config.WAKE_ON_NAME); longest first.
-_NAMES_ALT = "|".join(r"\W+".join(map(re.escape, n.split())) for n in config.NAMES)
-_NAME_FIRST_RE = re.compile(rf"^\W*(?:{_NAMES_ALT})\b[\s,.!?:;-]*", re.IGNORECASE)
-
-
 def strip_leading_word(text: str, word: str, loose: bool = False) -> str:
     """The text without the robot's wake word at its start, however many times
     it's there ("Computer computer, what time is it?" -> "what time is it?":
@@ -311,23 +296,8 @@ def strip_leading_word(text: str, word: str, loose: bool = False) -> str:
     return re.sub(rf"^\W*(?:{w}{after})+", "", text, flags=re.IGNORECASE).strip()
 
 
-def strip_wake_word(text: str) -> tuple[bool, str]:
-    """('Hey Rocky, what's 9 times 16?') -> (True, "what's 9 times 16?").
-    The question keeps its digits, punctuation and case — the brain needs
-    them. Returns (False, text) when no wake phrase is present."""
-    m = _WAKE_RE.search(text)
-    if m:
-        return True, text[m.end():].strip()
-    if config.WAKE_ON_NAME:
-        m = _NAME_FIRST_RE.match(text)
-        if m:
-            return True, text[m.end():].strip()
-    return False, text.strip()
-
-
 def _save_wav(audio: np.ndarray, path: str) -> None:
-    """Keep the last utterance on disk so mic quality can be inspected."""
-    import os
+    """An utterance as a 16 kHz WAV (the recordings)."""
     import wave
 
     try:
@@ -412,7 +382,7 @@ class Ears:
         # or his awake time is up, or the robot just heard its wake word) and
         # has_wake_word (which word counts at the moment).
         self.wake_needed: Callable[[], bool] = lambda: False
-        self.has_wake_word: Callable[[str], bool] = lambda text: strip_wake_word(text)[0]
+        self.has_wake_word: Callable[[str], bool] = lambda text: False
         self._wake_check = _OneAtATime(Transcriber()) if config.STT_ENGINE != "whisper" else None
         # DEBUG_STT_COMPARE: the other engine hears each utterance too, on its
         # own thread after this one has passed it on, so replies aren't delayed.
@@ -547,8 +517,6 @@ class Ears:
             peak = float(np.abs(utterance).max())
             if peak > 0.001:
                 utterance = utterance * min(0.9 / peak, 20.0)
-            if config.DEBUG_SAVE_UTTERANCE:
-                _save_wav(utterance, config.DEBUG_SAVE_UTTERANCE)
             t0 = time.time()
             text = self.transcriber.transcribe(utterance)
             print(f"  (turn: {segmenter.last_decision}; {config.STT_ENGINE} transcribed in {time.time() - t0:.2f}s)")

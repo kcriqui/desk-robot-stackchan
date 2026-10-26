@@ -50,7 +50,7 @@ from .dance import Dancer, length as dance_length
 from .memories import Memories
 from .timers import Timers, when
 from .thinking import Interrupted, RobotBrain
-from .ears import Ears, is_command, normalize, strip_leading_word, strip_wake_word
+from .ears import Ears, is_command, normalize, strip_leading_word
 from .eyes import Eyes
 from .tracker import Tracker
 
@@ -244,8 +244,6 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     # Agree on sleep: the robot may have kept its eyes shut (and its camera
     # off) across a brain restart, or come back awake after a reboot.
     await send_to_robot({"type": "asleep", "on": robot_asleep})
-    # No idle head glances: they fight deliberate looks. The eyes still move.
-    await send_to_robot({"type": "glance", "on": False})
     asyncio.create_task(send_clock())  # the clock screen's time zone and weather (fetched: don't hold up the link)
     await send_face_pack()
     await send_screen()
@@ -530,8 +528,7 @@ head_held = False  # he was told to look somewhere and is holding that pose
 
 
 async def set_head_held(held: bool) -> None:
-    """Remember that a deliberate look is in effect (shown on the console).
-    Idle glances are always off, so nothing else needs to move."""
+    """Remember that a deliberate look is in effect (shown on the console)."""
     global head_held
     head_held = held
 
@@ -1041,7 +1038,6 @@ def check_tts(text: str, pcm: bytes) -> None:
     it was given. Extra words = the model hallucinated (a laugh, "hello", a
     sound). Runs in a worker thread; prints only when something's off."""
     global _tts_checker
-    import re
     from .ears import Transcriber
     if _tts_checker is None:
         _tts_checker = Transcriber("base.en")
@@ -1234,7 +1230,8 @@ async def _console_command(action: str, payload: dict) -> dict:
         await use_character(str(payload.get("id", "")))  # a ValueError goes back to the page
     elif action == "characters":  # the Personalities card: every character in full
         return {"characters": [{"id": c.id, "builtin": c.id == personality.ROCKY.id,
-                                "character": personality.to_dict(c)} for c in characters(fresh=True)],
+                                "character": personality.to_dict(c),
+                                "wake_words": personality.wake_words(c)} for c in characters(fresh=True)],
                 "active": personality.CHARACTER.id, "voices": list(config.PIPER_VOICES),
                 "speakers": {k: v["speakers"] for k, v in config.PIPER_VOICES.items() if v.get("speakers")},
                 "default_voice": config.PIPER_VOICE, "face_packs": [p["id"] for p in face_packs()],
@@ -1344,12 +1341,11 @@ async def start_listening() -> None:
         config.STT_ENGINE, f"Whisper {config.STT_MODEL}")
     print(f"loading speech model {stt} and the turn-taking models (first run downloads them)...")
     global spotter
+    refresh_wake_words()  # the transcript wakes it on these, spotter or not
     if spotter is None and kws.available():
         try:
             spotter = await loop.run_in_executor(None, kws.Spotter)
-            refresh_wake_words()
-            if robot_socket is not None:
-                await apply_wake_engine()  # it connected while the spotter loaded, and the robot took the waking
+            refresh_wake_words()  # and gives them to the spotter
         except Exception as e:  # the transcript alone wakes it, as before
             print(f"(wake words: the spotter didn't start: {e})")
     elif spotter is None:
@@ -1375,7 +1371,7 @@ async def start_listening() -> None:
             robot_wake_word is None and time.time() >= awake_until)
         ears.has_wake_word = lambda text: (
             _robot_wake_word_in(text) is not None if robot_woke_at else
-            strip_wake_word(text)[0] or wakewords.match(text, _phrases(), loose=bool(kw_woke_at)) is not None)
+            wakewords.match(text, _phrases(), loose=bool(kw_woke_at)) is not None)
         mic = await loop.run_in_executor(None, ears.start)
     except Exception as e:
         ears = None
@@ -1787,7 +1783,7 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
     global awake_until
     global robot_woke_at, kw_hit, kw_woke_at
     text, started_at, ended_at, heard_at = item
-    woke, question = strip_wake_word(text)
+    woke, question = False, text.strip()
     # The brain's wake words: did the spotter hear one during this turn, and does the transcript start with it
     # (loosely when it did: "hey Gladys" is GLaDOS)? A phrase of another personality switches to it.
     hit = kw_hit if kw_hit and started_at - 1.0 <= kw_hit[0] <= ended_at + 2.0 else None
@@ -1795,7 +1791,7 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
     if hit:
         kw_hit = None
         kw_woke_at = 0.0
-    found = wakewords.match(text, _phrases(), loose=hit is not None) if robot_wake_word is None and wake_table else None
+    found = wakewords.match(text, _phrases(), loose=hit is not None)
     if robot_woke_at:
         # The first thing heard after the robot's wake word must contain it
         # (the robot sends the audio from just before it). The question is
@@ -1889,7 +1885,7 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
             finished = await converse(question)
             continue
         text, started_at, ended_at, heard_at = item
-        _, more = strip_wake_word(text)
+        more = (wakewords.match(text, _phrases()) or (None, text.strip()))[1]
         print(f"{config.HUMAN_NAME}: {text}")
         question = f"{question} {more}".strip()
         eyes.last_heard = question

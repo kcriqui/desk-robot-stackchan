@@ -108,8 +108,6 @@ class Face {
   // Asleep: eyes shut, breathing, Z's. Overrides the emotion while on.
   void setAsleep(bool on);
   bool asleep() const { return asleep_; }
-  // Eyes lead the head: pupils (and the eyes a little) toward x, y (-1..1, + = screen right / down), held holdMs.
-  void lookToward(float x, float y, uint32_t holdMs);
 
   // Talking: draws a mouth that opens with `level` (0..1, the speaker's
   // current loudness). Call every frame while audio plays.
@@ -161,7 +159,6 @@ class Face {
   // Drawing in face pixels: blocks for the pixel-art bits, smooth shapes at
   // the LCD's resolution for the rest.
   void dot(int x, int y, uint8_t ink);
-  void rect(int x, int y, int w, int h, uint8_t ink);
   void roundBox(float x, float y, float w, float h, float r, uint8_t ink);
   void line(float x0, float y0, float x1, float y1, uint8_t ink);  // between pixel centres, a pixel thick
   void disc(float cx, float cy, float r, uint8_t ink);

@@ -149,7 +149,7 @@ class BodyTests(unittest.TestCase):
             if axis == "pan":
                 self.assertLessEqual(abs(deg), body_mod.IDLE_LOOK[1], deg)
             else:
-                self.assertTrue(20.0 - 6.0 <= deg <= 20.0 + 10.0, deg)
+                self.assertTrue(20.0 - 6.0 - 3.0 <= deg <= 20.0 + 10.0, deg)  # a look's -6, then a nod's -3
 
     def test_stop_forgets_the_offset(self):
         robot, _, b = self.make()

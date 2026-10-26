@@ -92,7 +92,7 @@ class Body:
         """His voice just started: this emotion's gesture, then sway until quiet()."""
         self.talking, self._emotion = True, emotion
         if not self._looked:
-            self._start(self._perform(emotion, gesture=True))
+            self._start(self._perform(emotion))
 
     def feel(self, emotion: str) -> None:
         """His face changed mid-reply: play the new emotion's gesture and sway its way from now on."""
@@ -100,7 +100,7 @@ class Body:
             return
         self._emotion = emotion
         if not self._holds and not self._looked:
-            self._start(self._perform(emotion, gesture=True))
+            self._start(self._perform(emotion))
 
     def quiet(self) -> None:
         """Done talking (or the reply was dropped): back to rest."""
@@ -216,12 +216,11 @@ class Body:
             self._idle_off = (random.uniform(-1, 1) * IDLE_DRIFT[0], random.uniform(-0.5, 1) * IDLE_DRIFT[1])
             await self._go(*self._idle_off)
 
-    async def _perform(self, emotion: str, gesture: bool) -> None:
-        if gesture:
-            for dpan, dtilt, wait in GESTURES.get(emotion, []):
-                if not await self._go(dpan, dtilt):
-                    return
-                await asyncio.sleep(wait)
+    async def _perform(self, emotion: str) -> None:
+        for dpan, dtilt, wait in GESTURES.get(emotion, []):
+            if not await self._go(dpan, dtilt):
+                return
+            await asyncio.sleep(wait)
         posture = POSTURE.get(emotion, (0.0, 0.0))
         style = STYLE.get(emotion, (1.0, 1.0))
         if not await self._go(*posture) or style is None:

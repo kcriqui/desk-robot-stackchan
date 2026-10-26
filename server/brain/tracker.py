@@ -3,7 +3,7 @@
 Runs in its own thread (OpenCV is blocking). For every new frame from Eyes
 it detects faces (YuNet, ~3 ms at 320x240), picks the biggest, works out how
 far off-center it is, and nudges the pan/tilt estimate toward it. The
-proposed head pose goes into an outbox; main.py sends it to the robot.
+proposed head pose goes to the on_pose callback; main.py sends it to the robot.
 
 The camera rides on the head, so this is a simple servo loop: an error of
 x% of the half-width means the face is x% of half the field of view off
@@ -36,7 +36,6 @@ class Tracker:
         self.pan = 0.0     # our estimate of where the head is (deg)
         self.tilt = config.TILT_REST
         self.tracking = False
-        self.face: tuple[int, int, int, int] | None = None  # x, y, w, h in the frame
         self.last_seen = 0.0
         self.enabled = config.TRACKING
         self._det = None
@@ -77,7 +76,6 @@ class Tracker:
                 if faces is not None and len(faces):
                     best = max(faces, key=lambda f: f[2] * f[3])
                     face = tuple(int(v) for v in best[:4])
-            self.face = face
             now = time.time()
 
             if face is not None:

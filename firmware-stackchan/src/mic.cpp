@@ -1,6 +1,7 @@
 #include "mic.h"
 
 #include <M5Unified.h>
+#include <freertos/idf_additions.h>
 
 static const int SAMPLE_RATE = 16000;
 // record() queues up to two buffers and blocks until a slot frees, so once
@@ -13,7 +14,8 @@ void Mic::begin(float gain) {
   queue_ = xQueueCreate(16, FRAME_BYTES);  // ~0.5 s of frames
   ring_ = static_cast<int16_t*>(ps_malloc(PREROLL_FRAMES * FRAME_BYTES));
   preroll_ = static_cast<int16_t*>(ps_malloc(PREROLL_FRAMES * FRAME_BYTES));
-  xTaskCreatePinnedToCore(taskEntry, "mic", 4096, this, 2, nullptr, 0);
+  // Stack and buffers in PSRAM: internal RAM is what the robot runs short of.
+  xTaskCreatePinnedToCoreWithCaps(taskEntry, "mic", 4096, this, 2, nullptr, 0, MALLOC_CAP_SPIRAM);
 }
 
 bool Mic::nextFrame(uint8_t* out) {
@@ -47,7 +49,14 @@ bool Mic::release(uint32_t timeoutMs) {
 void Mic::taskEntry(void* self) { static_cast<Mic*>(self)->task(); }
 
 void Mic::task() {
-  static int16_t bufs[NUM_BUFS][FRAME_SAMPLES];
+  const size_t size = sizeof(int16_t) * NUM_BUFS * FRAME_SAMPLES;
+  void* mem = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
+  if (mem == nullptr) mem = heap_caps_malloc(size, MALLOC_CAP_INTERNAL);  // no PSRAM to spare: as before
+  if (mem == nullptr) {
+    Serial.println(F("mic: no memory for its buffers"));
+    vTaskDelete(nullptr);
+  }
+  auto bufs = static_cast<int16_t(*)[FRAME_SAMPLES]>(mem);
   int idx = 0;
   int queued = 0;
 

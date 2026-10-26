@@ -68,7 +68,6 @@ uint32_t lastFrameMs = 0;
 uint32_t nextStateMs = 0;
 bool demoMode = true;  // cycles emotions on its own; off while the brain is connected
 bool brainConnected = false;
-bool glanceWanted = true;  // the brain's `glance on|off` (off while it holds a pose or tracks a face)
 
 // Every 5 s on serial: memory, the longest pause in each part of loop(), and
 // frames captured vs sent. For finding what stalls the link to the brain.
@@ -97,14 +96,6 @@ void printDiag(uint32_t nowMs) {
                 brainLink.connected() ? "brain up" : "brain DOWN");
   lastCaptured = captured;
   diag = Diag{};
-}
-
-// Idle glances only while Rocky is awake and his brain is connected. Asleep,
-// or with no server running, the head stays still.
-void applyGlances() {
-  bool on = brainConnected && !face.asleep() && glanceWanted;
-  panNeck.setIdleGlances(on);
-  tiltNeck.setIdleGlances(on);
 }
 
 // Asleep, he saves power and heat: the camera stops streaming (its frames are
@@ -284,7 +275,7 @@ void printScreen() {
   static const char* kNight[] = {"off", "dim", "dark"};
   static const char* kIdle[] = {"clock", "pong", "tetris", "frogger", "roam", "life"};
   Serial.printf("screen: face %u%% (0 = default), clock %u%% (0 = as awake), night %s below %u lux at %u%% "
-                "(room %s), idle %s, wake when near %s (at %u), power bank %s\n", screenCfg.face, screenCfg.clock,
+                "(room %s), idle %s, a hand stops it talking %s (at %u), power bank %s\n", screenCfg.face, screenCfg.clock,
                 kNight[min(screenCfg.night, (uint8_t)2)], screenCfg.darkLux, screenCfg.nightPct,
                 roomDark ? "dark" : "light", kIdle[min(screenCfg.idle, (uint8_t)5)], screenCfg.near ? "on" : "off",
                 screenCfg.nearLevel, screenCfg.powerBank ? "yes" : "no");
@@ -363,7 +354,6 @@ void setAsleep(bool on) {
     }
   }
   face.setAsleep(on);
-  applyGlances();
   applyStream();
   applyMic();
 }
@@ -385,7 +375,6 @@ void printHelp() {
   Serial.println(F("  blink        blink now"));
   Serial.println(F("  sleep on|off eyes shut, breathing, Z's"));
   Serial.println(F("  demo on|off  idle life: auto blinks and emotion changes"));
-  Serial.println(F("  glance on|off  allow idle head glances (only happen while the brain is connected and he is awake)"));
   Serial.println(F("  volume <0-1> speaker volume"));
   Serial.println(F("  beep         play a test tone through the speaker"));
   Serial.println(F("  mic on|off   stream the microphone to the brain"));
@@ -427,11 +416,11 @@ void handleCommand(String line) {
                        "skeptical excited love confused"));
     }
   } else if (cmd == "pan") {
-    if (leds.dancing()) leds.beat(millis());
+    if (leds.dancing()) leds.beat();
     panNeck.setTarget(arg.toFloat());
     Serial.printf("pan -> %.0f deg\n", panNeck.target());
   } else if (cmd == "tilt") {
-    if (leds.dancing()) leds.beat(millis());
+    if (leds.dancing()) leds.beat();
     tiltNeck.setTarget(arg.toFloat());
     Serial.printf("tilt -> %.0f deg\n", tiltNeck.target());
   } else if (cmd == "raw") {
@@ -479,14 +468,15 @@ void handleCommand(String line) {
     speaker.setVolume(arg.toFloat());
     Serial.printf("volume -> %.2f\n", arg.toFloat());
   } else if (cmd == "beep") {
-    // 0.4 s of 440 Hz so the amp can be checked without the brain.
-    static int16_t tone[16000 * 4 / 10];
-    for (size_t i = 0; i < sizeof(tone) / sizeof(tone[0]); ++i) {
-      tone[i] = static_cast<int16_t>(8000 * sinf(2 * PI * 440 * i / 16000.0f));
-    }
+    // 0.4 s of 440 Hz so the amp can be checked without the brain (feed() copies it).
+    const size_t n = 16000 * 4 / 10;
+    int16_t* tone = static_cast<int16_t*>(heap_caps_malloc(n * sizeof(int16_t), MALLOC_CAP_SPIRAM));
+    if (tone == nullptr) return;
+    for (size_t i = 0; i < n; ++i) tone[i] = static_cast<int16_t>(8000 * sinf(2 * PI * 440 * i / 16000.0f));
     speaker.beginSpeech();
-    speaker.feed(reinterpret_cast<uint8_t*>(tone), sizeof(tone));
+    speaker.feed(reinterpret_cast<uint8_t*>(tone), n * sizeof(int16_t));
     speaker.endSpeech();
+    heap_caps_free(tone);
     Serial.println(F("beep"));
   } else if (cmd == "mic") {
     micWanted = (arg == "on");
@@ -496,9 +486,9 @@ void handleCommand(String line) {
   } else if (cmd == "wake") {
     // wake on|off: robot-side waking (the brain sends this); wake <0-1>: threshold
     if (arg == "on" || arg == "off") {
-      wakeOnRobot = (arg == "on") && wake.ready();
+      wakeOnRobot = (arg == "on") && wake.start();
       applyMic();
-    } else if (!arg.isEmpty()) {
+    } else if (!arg.isEmpty() && wake.ready()) {
       wake.setThreshold(arg.toFloat());
     }
     Serial.printf("wake: %s, \"%s\" %s, %lu detections (engine: %s)\n", wakeOnRobot ? "on" : "off",
@@ -611,10 +601,6 @@ void handleCommand(String line) {
     if (!clockScreen.setWeather(arg)) Serial.println(F("usage: weather <temp> <hi> <lo> <code> <day 0|1> <F|C> <words>"));
   } else if (cmd == "poweroff") {
     powerOff(arg.isEmpty() ? String("console") : arg);
-  } else if (cmd == "glance") {
-    glanceWanted = (arg == "on");
-    applyGlances();
-    Serial.printf("glance %s\n", glanceWanted ? "on" : "off");
   } else if (cmd == "demo") {
     demoMode = (arg == "on");
     face.setIdle(demoMode);
@@ -696,8 +682,8 @@ void setup() {
 
   // M5Unified, the IO expander (servo power, LEDs), head touch, servos.
   M5StackChan.begin();
-  // The LED bars aren't used yet. After a full power-off they come up showing
-  // whatever is in the LED driver's memory, so switch them off.
+  // After a full power-off the light bars come up showing whatever is in the LED
+  // driver's memory: dark until leds.update() draws them.
   M5StackChan.showRgbColor(0, 0, 0);
   M5StackChan.Motion.setAutoTorqueReleaseEnabled(SERVO_AUTO_RELAX);
   // Tracking streams small moves; re-reading the servo before each one stutters.
@@ -712,10 +698,8 @@ void setup() {
   light.begin();  // before the camera borrows the bus
   awakeBrightness = screenCfg.face ? fromPct(screenCfg.face) : defaultBrightness;
   M5.Display.setBrightness(awakeBrightness);
-  panNeck.begin(ServoNeck::Axis::Pan, PAN_MIN_DEG, PAN_MAX_DEG, PAN_SPEED,
-                PAN_GLANCE_DEG, PAN_INVERT);
-  tiltNeck.begin(ServoNeck::Axis::Tilt, TILT_MIN_DEG, TILT_MAX_DEG, TILT_SPEED,
-                 TILT_GLANCE_DEG, TILT_INVERT, TILT_REST_DEG);
+  panNeck.begin(ServoNeck::Axis::Pan, PAN_MIN_DEG, PAN_MAX_DEG, PAN_SPEED, PAN_INVERT);
+  tiltNeck.begin(ServoNeck::Axis::Tilt, TILT_MIN_DEG, TILT_MAX_DEG, TILT_SPEED, TILT_INVERT, TILT_REST_DEG);
 
   mic.begin(MIC_GAIN);
   if (wake.begin("spiffs", WAKE_MODEL)) {
@@ -740,10 +724,9 @@ void setup() {
 
   demoMode = true;
   face.setIdle(true);
-  applyGlances();  // off: no brain yet
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.23 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.26 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -756,7 +739,7 @@ void setup() {
              [](bool connected) {
                // The brain picks emotions while it's connected; the demo
                // cycle takes over again if it goes away. Blinks stay on
-               // either way; idle glances only while connected and awake.
+               // either way.
                brainConnected = connected;
                demoMode = !connected;
                if (connected) {
@@ -764,7 +747,6 @@ void setup() {
                } else {
                  wakeOnRobot = false;  // a brain that doesn't ask gets the old behaviour
                }
-               applyGlances();
                applyMic();
              });
 #else

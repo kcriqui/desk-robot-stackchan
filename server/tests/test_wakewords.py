@@ -32,6 +32,11 @@ class MatchTests(unittest.TestCase):
         self.assertIsNone(self.m("My computer keeps crashing.", loose=True))
         self.assertIsNone(self.m("I told Rocky about it"))
         self.assertIsNone(self.m("I like rocks", loose=True))
+        self.assertIsNone(self.m("I said hey Rocky"))  # mid-sentence: not a wake
+
+    def test_up_to_two_fillers_first(self):
+        self.assertEqual(self.m("Okay so, hey Rocky, what time is it?"), ("hey rocky", "what time is it?"))
+        self.assertIsNone(self.m("Okay so well, hey Rocky"))  # three is talking, not waking
 
 
 class TableTests(unittest.TestCase):

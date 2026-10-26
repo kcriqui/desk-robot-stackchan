@@ -26,7 +26,6 @@ import os
 import re
 import threading
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
 
 import openai
 
@@ -262,12 +261,6 @@ TOOLS = [
 ]
 
 
-@dataclass
-class Reply:
-    text: str
-    emotion: str
-
-
 class Interrupted(Exception):
     """The human started talking again; drop this reply."""
 
@@ -330,11 +323,6 @@ class RobotBrain:
         # failed turns leave nothing behind; a half turn (a tool result whose
         # call was cut) gets every later request refused with a 400.
         self._inflight: list[dict] | None = None
-
-    def ask(self, question: str, jpeg: bytes | None = None, camera_wanted: bool = False) -> Reply:
-        """The whole reply at once. See reply() for the streaming form."""
-        sentences = list(self.reply(question, jpeg, camera_wanted=camera_wanted))
-        return Reply(" ".join(sentences), self.emotion)
 
     def reply(
         self,

@@ -1,9 +1,10 @@
 """Which phrases wake the robot, and whose they are: every personality's own (Character.wake_words), which also
 switch to that personality, plus generic ones (config.WAKE_WORDS, like "computer") that wake whoever is in use.
 
-The keyword spotter (kws.py) hears them in the audio; the transcript then confirms them loosely (match()),
+The transcript decides (match()), loosely when the keyword spotter (kws.py, off by default) heard the phrase,
 since speech-to-text mangles names: "hey glad us" for "hey GLaDOS". A phrase must start what was said (after
-at most one filler word), so "my computer keeps crashing" doesn't wake it.
+at most two filler words: "okay so, hey Rocky"), so "my computer keeps crashing" and "I told Rocky" don't wake
+it.
 """
 
 from __future__ import annotations
@@ -12,19 +13,24 @@ import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-from . import config, kws
+from . import config
 
 _FILLER = {"hey", "hi", "oh", "okay", "ok", "um", "uh", "so", "and", "well", "yo"}
 
 
 @dataclass(frozen=True)
 class Entry:
-    phrase: str        # as kws.clean() writes it
+    phrase: str        # as clean() writes it
     owner: str | None  # the character it belongs to; None = generic, wakes whoever is in use
 
 
+def clean(text: str) -> str:
+    """Lowercase words of letters and apostrophes: how phrases are stored and compared."""
+    return " ".join(re.sub(r"[^a-z' ]+", " ", text.lower()).split())
+
+
 def generic() -> list[str]:
-    return [p for p in map(kws.clean, config.WAKE_WORDS.split(",")) if p]
+    return [p for p in map(clean, config.WAKE_WORDS.split(",")) if p]
 
 
 def table(owned: list[tuple[str, list[str]]]) -> list[Entry]:
@@ -34,7 +40,7 @@ def table(owned: list[tuple[str, list[str]]]) -> list[Entry]:
     for p in generic():
         out.setdefault(p, Entry(p, None))
     for owner, phrases in owned:
-        for p in map(kws.clean, phrases):
+        for p in map(clean, phrases):
             if p:
                 out.setdefault(p, Entry(p, owner))
     return list(out.values())
@@ -55,8 +61,8 @@ def match(text: str, phrases: list[str], loose: bool = False) -> tuple[str, str]
     words = _words(text)
     need = 0.6 if loose else 0.82
     best: tuple[float, str, int] | None = None
-    for start in (0, 1):
-        if start and (not words or words[0].group() not in _FILLER):
+    for start in (0, 1, 2):
+        if start and (len(words) < start or words[start - 1].group() not in _FILLER):
             break
         for p in phrases:
             squashed = p.replace(" ", "")

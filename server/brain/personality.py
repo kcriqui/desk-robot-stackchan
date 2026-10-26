@@ -43,7 +43,7 @@ import string
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, web
+from . import config, wakewords, web
 
 CHARACTERS_DIR = Path(__file__).resolve().parent.parent / "characters"
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
@@ -78,7 +78,8 @@ ROCKY = Character(
     id="rocky",
     name="Rocky",
     pronouns="he",
-    wake_words=["hey rocky", "rocky chan", "hey rocky chan"],
+    # Plus "hey <name>" and <name> for each of ROBOT_NAME's and ROBOT_ALIASES' spoken forms (wake_words()).
+    wake_words=["hey rocket", "hey rocking", "a rocky", "hey ricky"],  # what speech-to-text hears for "hey Rocky"
     description="the Eridian engineer from Project Hail Mary (built in)",
     identity="""You are Rocky, the Eridian engineer from Project Hail Mary, now living as a small desk robot \
 on your human's desk.{rename} Your human is {human}: your partner and crewmate, the way Grace was before he \
@@ -388,8 +389,9 @@ def to_dict(c: Character) -> dict:
 def wake_words(c: Character | None = None) -> list[str]:
     """What wakes the robot as this character (the active one by default): its own phrases, or "hey <name>"."""
     c = c or CHARACTER
-    plain = " ".join(re.sub(r"[^a-z' ]+", " ", c.name.lower()).split())
-    return c.wake_words or [f"hey {plain}"]
+    if c.id == ROCKY.id:  # his names (RockyChan, Rocky...): "hey" and the name, or the name to start a sentence
+        return list(dict.fromkeys([*(f"hey {n}" for n in config.NAMES), *config.NAMES, *c.wake_words]))
+    return c.wake_words or [f"hey {wakewords.clean(c.name)}"]
 
 
 def _face_first(line: str) -> str:

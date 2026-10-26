@@ -42,10 +42,6 @@ constexpr int TILT_SPEED = 550;
 // this to false.
 constexpr bool SERVO_AUTO_RELAX = true;
 
-// Idle glance range, degrees either side of where the head was put.
-constexpr float PAN_GLANCE_DEG = 25.0f;
-constexpr float TILT_GLANCE_DEG = 8.0f;
-
 // ─── Microphone ──────────────────────────────────────────────────────────────
 // Software gain on top of M5Unified's own (mic_config_t::magnification).
 // Raise if the brain says "too quiet", lower if loud speech clips.

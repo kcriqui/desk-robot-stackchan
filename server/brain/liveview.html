@@ -170,7 +170,7 @@
   .srow .name small { display: block; color: var(--muted); font-size: 12px; }
   .srow .ctl { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
   .srow input[type=text] { min-width: 0; width: 210px; flex: none; }
-  .srow input[type=number], .srow input[type=time], .srow select { font: 14px var(--body); color: var(--ink); background: #090c13;
+  .srow input[type=number], .srow select { font: 14px var(--body); color: var(--ink); background: #090c13;
     border: 1px solid var(--line-strong); border-radius: 4px; padding: 6px 8px; }
   .srow input[type=number] { width: 80px; }
   .srow input[type=range] { width: 150px; }
@@ -259,7 +259,7 @@
     <section aria-labelledby="l-sees">
       <h2 class="label" id="l-sees"><span><span class="pname">{name}</span> sees</span><span class="sub" id="framenote"></span></h2>
       <div class="viewport dark" id="viewport">
-        <img id="cam" src="/stream" alt="">
+        <img src="/stream" alt="">
         <div class="reticle"><div class="horizon" id="horizon"></div><div class="meridian" id="meridian"></div></div>
         <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
         <div class="readout"><span id="rpan">pan —</span><span id="rtilt">tilt —</span><span id="rtrack" class="off">not tracking</span></div>
@@ -371,7 +371,7 @@
                 <textarea id="c-emotions" rows="2" maxlength="1000" placeholder="Which face tags suit them, and what each means for them."></textarea></div>
               <div class="set"><label class="k" for="c-examples">Example replies</label>
                 <textarea id="c-examples" rows="8" maxlength="6000"></textarea>
-                <p class="hint" id="c-exhint">One per line, each starting with a face: [happy], [thinking]… These shape how they sound more than anything.</p></div>
+                <p class="hint">One per line, each starting with a face: [happy], [thinking]… These shape how they sound more than anything.</p></div>
               <fieldset class="set"><legend class="k">Said without thinking</legend>
                 <div class="lines" id="c-lines"></div>
                 <details><summary>Timers, battery, heat, power and the rest</summary><div class="lines" id="c-morelines"></div></details>
@@ -536,7 +536,7 @@
     $("volv").textContent = (+$("vol").value).toFixed(2);
     clearTimeout(volTimer); volTimer = setTimeout(() => act("volume", { level: +$("vol").value }), 150);
   });
-  document.querySelector('[data-act=center]').onclick = () => act("center", {}, "Head centered, glances back on");
+  document.querySelector('[data-act=center]').onclick = () => act("center", {}, "Head centered");
   $("trackbtn").onclick = () => act("track", { on: !status.tracking_enabled });
   $("sayform").onsubmit = ev => { ev.preventDefault(); const t = $("saytext").value.trim(); if (t) { act("say", { text: t }, "Saying it"); $("saytext").value = ""; } };
   document.querySelector('[data-act=ask]').onclick = () => { const t = $("saytext").value.trim(); if (t) { act("ask", { text: t }, "Asked " + NAME); $("saytext").value = ""; } };
@@ -624,7 +624,7 @@
     }
     if (focus) tab.focus();
     placeTabGlow();
-    if (tab.id === "t-settings" && typeof loadSettings === "function") loadSettings();
+    if (tab.id === "t-settings") loadSettings();
     if (tab.id === "t-log") requestAnimationFrame(() => { const l = $("log"); l.scrollTop = l.scrollHeight; });  // the newest lines
     try { localStorage.setItem("rocky-tab", tab.id); } catch {}
   }
@@ -706,7 +706,7 @@
   function buildSettings() {
     const box = $("settingsbox");
     for (const [title, sub, rows] of SETTINGS_UI) {
-      const card = document.createElement("section"); card.className = "card";
+      const card = document.createElement("section"); card.className = "card"; card.dataset.title = title;
       card.innerHTML = `<h2 class="label"><span>${title}</span><span class="sub">${sub}</span></h2>`;
       for (const [sec, key, label, help, kind] of rows) {
         const row = document.createElement("div"); row.className = "srow";
@@ -780,7 +780,7 @@
       }
       showLight(settingsMeta.light);
       const fw = settingsMeta.robot_fw;
-      document.querySelector("#settingsbox .card:nth-child(4) .sub").textContent =
+      document.querySelector('#settingsbox .card[data-title="Screen"] .sub').textContent =
         "firmware 0.6.7+" + (fw ? " · the robot has " + fw : " · no robot connected");
     } catch (e) { toast(e.message, true); }
   }
@@ -892,7 +892,7 @@
     cstate.sel = c.id; cstate.isNew = false;
     for (const b of $("charlist").children) b.setAttribute("aria-pressed", b.dataset.id === c.id);
     $("chartitle").textContent = c.character.name;
-    $("chardesc").textContent = c.builtin ? c.character.description + ". Wake words: " + (c.character.wake_words || []).join(", ") +
+    $("chardesc").textContent = c.builtin ? c.character.description + ". Wake words: " + (c.wake_words || []).join(", ") +
       ". Duplicate him to make one of your own from his." : "";
     $("charactions").hidden = false;
     $("charuse").disabled = c.id === cstate.active; $("charuse").textContent = c.id === cstate.active ? "In use" : "Use this personality";
@@ -982,7 +982,7 @@
     if (!confirmCharDiscard()) return;
     const name = prompt("A name for the copy:", "");
     if (!name) return;
-    try { const j = await api("character_save", { character: { ...charOf(cstate.sel).character, name } }); cstate.dirty = false; await loadChars(j.id); toast("Copied: edit away"); }
+    try { const j = await api("character_save", { character: { ...charOf(cstate.sel).character, name, wake_words: [] } }); cstate.dirty = false; await loadChars(j.id); toast("Copied: edit away"); }
     catch (e) { toast(e.message, true); }
   };
   $("charexport").onclick = () => {
@@ -1029,7 +1029,6 @@
   loadChars();
 
   // ── status loop ────────────────────────────────────────────────────────
-  let lastSeq = -1;
   let brainStarted = null;
   async function tick() {
     try {
@@ -1060,7 +1059,7 @@
         : s.thinking ? "thinking" : s.awake ? "awake" : s.deep_sleep ? "deep sleep" : "asleep";
       $("mic").textContent = s.listening ? (s.mic === "robot" ? "robot mic" : "Mac mic") : "off";
       $("awakenote").textContent = off ? "powered off at " + s.powered_off.at
-          + (s.powered_off.why === "battery" ? " (battery empty)" : " (idle)") + " · plug in USB or press the power button"
+          + (s.powered_off.why === "battery" ? " (battery empty)" : s.powered_off.why === "power bank" ? " (power pack empty)" : " (idle)") + " · plug in USB or press the power button"
         : s.awake ? "dozes off in " + Math.max(0, Math.round(s.awake_for)) + " s"
         : s.deep_sleep ? "deep sleep: screen off, saving battery · " + wakeHint : "asleep · " + wakeHint;
 
@@ -1078,7 +1077,7 @@
       $("rpan").textContent = "pan " + Math.round(pan) + "°"; $("rtilt").textContent = "tilt " + Math.round(tilt) + "°";
       $("rtrack").textContent = s.tracking ? "face locked" : s.tracking_enabled ? "looking for a face" : s.head_held ? "holding" : "not tracking";
       $("rtrack").className = s.tracking ? "" : "off";
-      $("headnote").textContent = s.head_held ? "holding a pose · glances paused" : "";
+      $("headnote").textContent = s.head_held ? "holding a pose" : "";
       if (!dragging.has("pan")) { $("pan").value = Math.round(pan); $("panv").textContent = Math.round(pan) + "°"; }
       if (!dragging.has("tilt")) { $("tilt").value = Math.round(tilt); $("tiltv").textContent = Math.round(tilt) + "°"; }
       if (s.volume != null && document.activeElement !== $("vol")) { $("vol").value = s.volume; $("volv").textContent = (+s.volume).toFixed(2); }

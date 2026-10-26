@@ -12,9 +12,6 @@ static const esp_afe_sr_iface_t* iface(const void* p) { return static_cast<const
 static esp_afe_sr_data_t* data(void* p) { return static_cast<esp_afe_sr_data_t*>(p); }
 
 bool Wake::begin(const char* partition, const char* model) {
-  // Internal RAM is scarce (WiFi and the camera's DMA need it), so
-  // everything that can goes to PSRAM. Logged so the cost stays visible.
-  size_t freeBefore = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   srmodel_list_t* models = esp_srmodel_init(partition);
   if (models == nullptr) {
     snprintf(status_, sizeof(status_), "no models in partition \"%s\"", partition);
@@ -26,6 +23,25 @@ bool Wake::begin(const char* partition, const char* model) {
     Serial.printf("wake: %s (tools/srmodels.py upload); the brain will listen for the name instead\n", status_);
     return false;
   }
+  models_ = models;
+  strlcpy(model_, model, sizeof(model_));
+  // "wn9_computer_tts" -> "computer"
+  const char* w = strchr(model, '_');
+  strlcpy(word_, w ? w + 1 : model, sizeof(word_));
+  if (char* t = strstr(word_, "_tts")) *t = '\0';
+  strlcpy(status_, "ready, not started (the brain listens)", sizeof(status_));
+  Serial.printf("wake: \"%s\" ready; it starts when the brain asks for robot-side waking\n", word_);
+  return true;
+}
+
+bool Wake::start() {
+  if (afe_ != nullptr) return true;
+  if (models_ == nullptr) return false;
+  // ~33 KB of internal RAM, so only when the robot does the waking (the brain's "robot" setting). Everything that
+  // can goes to PSRAM; the cost is logged so it stays visible.
+  size_t freeBefore = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  srmodel_list_t* models = static_cast<srmodel_list_t*>(models_);
+  const char* model = model_;
   // One mic channel ("M"), wake word only: no echo cancelling (the mic is
   // off while he talks), no beamforming, noise suppression or VAD.
   afe_config_t* cfg = afe_config_init("M", models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
@@ -51,12 +67,8 @@ bool Wake::begin(const char* partition, const char* model) {
   }
 
   iface_ = h;
-  afe_ = d;
+  afe_ = d;  // before the tasks: the detect task fetches from it at once
   chunk_ = h->get_feed_chunksize(d);
-  // "wn9_computer_tts" -> "computer"
-  const char* w = strchr(model, '_');
-  strlcpy(word_, w ? w + 1 : model, sizeof(word_));
-  if (char* t = strstr(word_, "_tts")) *t = '\0';
   in_ = xStreamBufferCreateWithCaps(16000 * 2, chunk_ * 2, MALLOC_CAP_SPIRAM);  // ~1 s of slack
   xTaskCreatePinnedToCoreWithCaps(feedEntry, "wake-feed", 4096, this, 2, nullptr, 0,  // like the mic task
                                   MALLOC_CAP_SPIRAM);

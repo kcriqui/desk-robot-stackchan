@@ -13,21 +13,16 @@ or no sherpa_onnx package: available() is False and the brain wakes on the trans
 
 from __future__ import annotations
 
-import re
 import threading
 from pathlib import Path
 
 import numpy as np
 
 from . import config
+from .wakewords import clean
 
 _FILES = ("tokens.txt", "bpe.model", "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
           "decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx", "joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx")
-
-
-def clean(phrase: str) -> str:
-    """A phrase as the spotter takes it: lowercase words of letters and apostrophes."""
-    return " ".join(re.sub(r"[^a-z' ]+", " ", phrase.lower()).split())
 
 
 class Spotter:

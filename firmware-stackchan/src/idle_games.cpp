@@ -1,5 +1,7 @@
 #include "idle_games.h"
 
+#include <esp_heap_caps.h>
+
 // From the original project's V2 (cgro00/desk-robot firmware/src/idle_games.cpp, MIT): the three games and how
 // they play themselves are V2's, coordinate for coordinate in its 128 x 64 pixels. What changed for the StackChan:
 // colour (Tetris pieces, the river and logs, cars, the frog), drawn on the face's canvas at the LCD's resolution,
@@ -571,7 +573,8 @@ void IdleGames::lifeStep() {
     if (--L.pause == 0) lifeSeed();
     return;
   }
-  static uint8_t next[LH][LW];
+  static auto next = static_cast<uint8_t(*)[LW]>(heap_caps_malloc(LH * LW, MALLOC_CAP_SPIRAM));  // not internal RAM
+  if (next == nullptr) return;  // no memory: the board stays as it is
   uint32_t hash = 2166136261u;  // FNV-1a over the live cells
   int alive = 0;
   for (int y = 0; y < LH; ++y) {

@@ -211,22 +211,12 @@ DEBUG_TTS_CHECK = False
 
 # Listening. The robot's mic when it is connected, the computer's otherwise.
 LISTEN_ON_START = True
-WAKE_PHRASES = [  # "hey"/"hi" + each name, then what speech-to-text tends to hear for "hey Rocky"
-    *(f"{greeting} {n}" for n in NAMES for greeting in ("hey", "hi")),
-    "hey rocky",
-    "hey rocket",
-    "hey rocking",
-    "hi rocky",
-    "a rocky",
-    "hey ricky",
-]
-# The robot can listen for a wake word itself (firmware-stackchan with an
-# esp-sr model; it says which in its hello). Then, asleep, it sends no audio
-# until it hears it, and the brain only checks that the transcript that
-# follows contains it (a false wake goes straight back to sleep).
-# WAKE_ON_ROBOT=0 in server/.env makes the brain listen for his name in the
-# audio instead, as without the feature. ROBOT_WAKE_WORD is what the
-# robot's model listens for, as speech-to-text writes it.
+# The robot can also listen for a wake word itself (firmware-stackchan with an
+# esp-sr model; it says which in its hello): the "robot" WAKE_ENGINE below.
+# Then, asleep, it sends no audio until it hears it, and the brain checks that
+# the transcript that follows contains it (a false wake goes straight back to
+# sleep). WAKE_ON_ROBOT=0 in server/.env forbids that. ROBOT_WAKE_WORD is what
+# the robot's model listens for, as speech-to-text writes it.
 WAKE_ON_ROBOT = os.environ.get("WAKE_ON_ROBOT", "1") not in ("", "0")
 ROBOT_WAKE_WORD = os.environ.get("ROBOT_WAKE_WORD", "computer").strip().lower()
 # After the robot wakes, how long to wait for something to be said before
@@ -251,12 +241,6 @@ KWS_THRESHOLD = 0.15  # synthetic clips 2026-10-25: these caught "hey Juniper" i
 RECORD_DIR = os.environ.get("RECORD_DIR", str(Path(__file__).resolve().parent.parent / "data" / "recordings"))
 RECORD_UTTERANCES = os.environ.get("RECORD_UTTERANCES", "1") not in ("", "0")
 RECORD_KEEP = 2000
-WAKE_PHRASES = list(dict.fromkeys(WAKE_PHRASES))
-# Also wake on his name alone at the very start of a sentence ("Rocky, ...",
-# "Rocky."). A name further in ("I told Rocky...") still doesn't wake him.
-# On for the StackChan: its mic is quieter, and the soft "hey" often doesn't
-# make it into the transcript.
-WAKE_ON_NAME = BODY == "stackchan"
 # Speech-to-text engine. STT_ENGINE in server/.env:
 #   parakeet   NVIDIA Parakeet TDT 0.6B on the CPU (brain/parakeet.py), the
 #              default: the fewest errors of five engines on the user's test
@@ -318,7 +302,6 @@ TURN_THRESHOLD = 0.5
 # If you start talking again while Rocky is still thinking (before he speaks),
 # speech that lasts this long cancels his reply and he listens to the rest.
 CANCEL_MIN_SPEECH = 0.3
-DEBUG_SAVE_UTTERANCE = ""  # set to "debug/last_utterance.wav" to keep the last thing heard, for mic tuning
 AWAKE_SECONDS = 60.0     # after "hey Rocky" he stays awake; each thing you say
                          # resets this clock, and when it runs out he dozes off
 DOZE_HOLD_SECONDS = 20.0  # ...unless he's hearing speech: then he waits up to this
