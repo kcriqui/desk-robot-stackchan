@@ -82,6 +82,7 @@ heard: asyncio.Queue[tuple[str, float, float, float]] = asyncio.Queue()
 speech_started = asyncio.Event()  # the human began a new turn (set by the ears)
 awake_until = 0.0  # while time.time() < this, he's awake: no wake word needed
 robot_speak_done = asyncio.Event()  # robot finished playing the last reply
+power_off_asked_at = 0.0  # when "power off" was said: a yes within POWER_OFF_CONFIRM_SECONDS powers it off
 speaking_reply = None  # the SpokenReply being thought and spoken (converse), so a hush can stop it
 eyes = Eyes()
 head_moves: asyncio.Queue[tuple[float | None, float | None, bool]] = asyncio.Queue()
@@ -244,6 +245,8 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     # Agree on sleep: the robot may have kept its eyes shut (and its camera
     # off) across a brain restart, or come back awake after a reboot.
     await send_to_robot({"type": "asleep", "on": robot_asleep})
+    if robot_asleep:
+        asyncio.create_task(_sleep_pose(True))  # head down, as when it fell asleep
     asyncio.create_task(send_clock())  # the clock screen's time zone and weather (fetched: don't hold up the link)
     await send_face_pack()
     await send_screen()
@@ -401,7 +404,7 @@ async def handle_console_line(line: str) -> bool:
         if robot_socket is None:
             print("no robot connected")
         else:
-            await power_off("power_off_idle")  # the goodbye, then the robot powers off
+            await power_off("power_off_asked")  # the goodbye, then the robot powers off
     elif cmd == "memories":
         facts = memories.facts()
         print("\n".join(f"  #{f.id} {f.text}  ({f.added}" + (f" to {f.until})" if f.until else ")")
@@ -543,6 +546,7 @@ async def set_asleep(on: bool) -> None:
     tracking (a sleeping robot shouldn't keep turning to follow you), and
     waking resumes it."""
     global robot_asleep, resume_tracking
+    changed = on != robot_asleep
     robot_asleep = on
     if on:
         if body is not None:
@@ -555,6 +559,24 @@ async def set_asleep(on: bool) -> None:
     elif not on and resume_tracking:
         await set_tracking(True, announce=False)
     await send_to_robot({"type": "asleep", "on": on})
+    if changed and robot_socket is not None:
+        asyncio.create_task(_sleep_pose(on))
+
+
+async def _sleep_pose(asleep: bool) -> None:
+    """Falling asleep: head to the middle, then down as far as it goes (it naps). Waking: back up to the middle."""
+    if asleep:
+        await send_to_robot({"type": "pan", "deg": 0})
+        await asyncio.sleep(0.8)
+        if not robot_asleep:
+            return  # woken meanwhile: leave the head up
+        tilt = config.TRACK_TILT_MIN
+    else:
+        await send_to_robot({"type": "pan", "deg": 0})
+        tilt = config.TILT_REST
+    await send_to_robot({"type": "tilt", "deg": tilt})
+    if tracker is not None:
+        tracker.note_pose(pan=0, tilt=tilt)
 
 
 def situation() -> str:
@@ -1288,7 +1310,7 @@ async def _console_command(action: str, payload: dict) -> dict:
         if robot_socket is None:
             raise ValueError("no robot connected")
         print("console: power off")
-        asyncio.create_task(power_off("power_off_idle"))
+        asyncio.create_task(power_off("power_off_asked"))
     elif action == "remember":
         fact, _ = memories.add(str(payload.get("text", "")))  # a ValueError goes back to the page
         print(f"console: remember #{fact.id} {fact.text}")
@@ -1721,12 +1743,31 @@ async def power_off(key: str) -> None:
     turns it back on."""
     global powering_off, powered_off, awake_until
     powering_off = True
-    why = {"power_off_battery": "battery", "power_off_bank": "power bank"}.get(key, "idle")
+    why = {"power_off_battery": "battery", "power_off_bank": "power bank", "power_off_asked": "asked"}.get(key, "idle")
     await announce(key, "sleepy")  # waits for any conversation, and for the words to finish playing
     print(f"(powering the robot off: {why})")
     await send_to_robot({"type": "power_off", "why": why})
     powered_off = (why, time.time())
     awake_until = 0.0  # the goodbye kept him "awake"; he's off
+
+
+async def hearing_loop() -> None:
+    """Tell the robot when speech starts and stops (a turn opens and closes), so its face and light bars show
+    it's hearing you. Repeated every few seconds while on: the robot drops it if the off goes missing."""
+    shown, to, last = False, None, 0.0
+    while True:
+        await asyncio.sleep(0.05)
+        on = ears is not None and ears.hearing and not ears.muted.is_set()
+        now = time.time()
+        if robot_socket is None:
+            to = None
+            continue
+        if on != shown or robot_socket is not to or (on and now - last > 4.0):
+            try:
+                await robot_socket.send(json.dumps({"type": "hearing", "on": on}))
+            except Exception:
+                continue  # it went away: the next socket gets it
+            shown, to, last = on, robot_socket, now
 
 
 async def watch_loop() -> None:
@@ -1780,7 +1821,7 @@ def _robot_wake_word_in(text: str) -> re.Match | None:
 
 
 async def _handle_heard(item: tuple[str, float, float, float]) -> None:
-    global awake_until
+    global awake_until, power_off_asked_at
     global robot_woke_at, kw_hit, kw_woke_at
     text, started_at, ended_at, heard_at = item
     woke, question = False, text.strip()
@@ -1849,6 +1890,20 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
         print(f"{personality.name()} [neutral]: {lines['track_off']}")
         await send_to_robot({"type": "emotion", "name": "neutral"})
         await say(lines["track_off"])
+        return
+    asked, power_off_asked_at = power_off_asked_at, 0.0  # only the very next thing said can be its yes
+    if asked and time.time() - asked < config.POWER_OFF_CONFIRM_SECONDS and is_command(norm, config.YES_PHRASES):
+        asyncio.create_task(power_off("power_off_asked"))  # its own task: announce() takes the turn lock we hold
+        return
+    if is_command(norm, config.POWER_OFF_PHRASES):
+        line = lines["power_off_confirm"]
+        if timers.pending():
+            line += " Your timer won't ring."
+        print(f"{personality.name()} [surprised]: {line}")
+        await send_to_robot({"type": "emotion", "name": "surprised"})
+        await say(line)
+        power_off_asked_at = time.time()
+        awake_until = time.time() + config.AWAKE_SECONDS
         return
     if is_command(norm, config.SLEEP_PHRASES):
         # "Rocky, sleep": goodnight line, sleepy face, and only "hey Rocky"
@@ -1954,6 +2009,7 @@ async def main() -> None:
         doze_task = asyncio.create_task(doze_loop())
         head_task = asyncio.create_task(head_loop())
         watch_task = asyncio.create_task(watch_loop())
+        hearing_task = asyncio.create_task(hearing_loop())
         idle_task = asyncio.create_task(body.idle_loop())  # small head moves while he waits for you
         if config.LISTEN_ON_START:
             await start_listening()
@@ -1964,6 +2020,7 @@ async def main() -> None:
             doze_task.cancel()
             head_task.cancel()
             watch_task.cancel()
+            hearing_task.cancel()
             idle_task.cancel()
             if ears is not None:
                 stop_listening()

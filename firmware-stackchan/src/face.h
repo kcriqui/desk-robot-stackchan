@@ -113,6 +113,9 @@ class Face {
   // current loudness). Call every frame while audio plays.
   void setTalking(bool on, float level = 0.0f);
 
+  // Hearing you (the brain says when): the eyes open a little wider and look straight at you.
+  void setListening(bool on) { listening_ = on; }
+
   // When idle behavior is on, the face blinks and glances around on its own.
   void setIdle(bool on) { idle_ = on; }
 
@@ -218,6 +221,8 @@ class Face {
   float smile_ = 0.0f;          // eased resting-mouth curve
 
   bool idle_ = true;
+  bool listening_ = false;
+  float listen_ = 0.0f;         // eased 0..1
   bool backdropDirty_ = true;
   uint32_t lastFrameMs_ = 0;
   uint32_t frame_ = 0;

@@ -55,7 +55,7 @@ void Leds::printStatus() const {
 }
 
 void Leds::update(uint32_t nowMs, uint32_t eye, bool asleep, bool deepSleep, bool thinking, bool speaking,
-                  float level) {
+                  float level, float heard) {
   if (static_cast<int32_t>(nowMs - nextMs_) < 0) return;
   nextMs_ = nowMs + FRAME_MS;
   const float t = nowMs / 1000.0f;
@@ -120,6 +120,16 @@ void Leds::update(uint32_t nowMs, uint32_t eye, bool asleep, bool deepSleep, boo
         k = 0.08f + 0.92f * k;
         for (int j = 0; j < 3; ++j) out[ledIndex(side, p)][j] = base[j] * k;
       }
+  } else if (hearing_ && !asleep) {  // hearing you: both bars fill from the front with your voice, never dark
+    float want = constrain(heard * 20.0f, 0.0f, 1.0f);
+    heard_ = want > heard_ ? heard_ + (want - heard_) * 0.6f : heard_ + (want - heard_) * 0.15f;
+    float lit = heard_ * PER_BAR;
+    for (int side = 0; side < 2; ++side)
+      for (int p = 0; p < PER_BAR; ++p) {
+        float k = constrain(lit - p, 0.0f, 1.0f);
+        k = 0.3f + 0.7f * k;
+        for (int j = 0; j < 3; ++j) out[ledIndex(side, p)][j] = base[j] * k;
+      }
   } else if (thinking) {  // a light sweeping front to back along both bars
     float phase = fmodf(t / 1.4f, 1.0f), pos = (phase < 0.5f ? phase * 2 : 2 - phase * 2) * (PER_BAR - 1);
     for (int side = 0; side < 2; ++side)
@@ -150,6 +160,7 @@ void Leds::update(uint32_t nowMs, uint32_t eye, bool asleep, bool deepSleep, boo
     nextMs_ = nowMs + DRIFT_FRAME_MS;  // slow changes: fewer frames, less I2C
   }
   if (!speaking) meter_ *= 0.8f;
+  if (!hearing_) heard_ *= 0.8f;
 
   // Brightness, and squared so fades look even to the eye.
   float scale = brightness_ / 100.0f;

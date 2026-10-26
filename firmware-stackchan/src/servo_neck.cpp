@@ -30,10 +30,19 @@ void ServoNeck::setRaw(float deg) {
 void ServoNeck::send(float deg) {
   // BSP angles are tenths of a degree.
   int a10 = static_cast<int>(lroundf((invert_ ? -deg : deg) * 10.0f));
+  // The BSP reads each servo's position once, at M5StackChan.begin(), and its spring starts from there. Right after
+  // power-up the servo often doesn't answer yet and it takes 0 instead: for the tilt that's the bottom of its range,
+  // so the first move snapped the head down to the limit and back up. So the first move (and the first after the
+  // servos' power returns) reads the servo again; the others don't (tracking's stream of moves stutters if they do).
+  if (syncNext_) M5StackChan.Motion.setAutoAngleSyncEnabled(true);
   if (axis_ == Axis::Pan) {
     M5StackChan.Motion.moveYaw(a10, speed_);
   } else {
     M5StackChan.Motion.movePitch(a10, speed_);
+  }
+  if (syncNext_) {
+    M5StackChan.Motion.setAutoAngleSyncEnabled(false);
+    syncNext_ = false;
   }
   commandedDeg_ = deg;
 }

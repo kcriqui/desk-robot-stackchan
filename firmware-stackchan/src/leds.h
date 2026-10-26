@@ -8,6 +8,7 @@
 //   awake and listening   each LED drifting slowly through colours of its own
 //   thinking              a light sweeping front to back along both bars
 //   talking               both bars fill from the back with the loudness of its voice
+//   hearing you           both bars fill from the front with the loudness of yours (the brain says when)
 //   asleep                off, or a slow Cylon scanner, its colour shifting a little each sweep (a setting)
 //   dancing               simple patterns, 150 ms a step: a running light, alternating, filling; moves change the colour
 //   alerts                a timer flashes them, low battery pulses amber, heat pulses red, a hush dips them
@@ -19,7 +20,8 @@ class Leds {
   enum class Alert : uint8_t { None, Timer, Battery, Hot, Hush };
 
   void setBrightness(uint8_t pct) { brightness_ = min<uint8_t>(pct, 100); }  // 0 = off
-  void setAsleepGlow(bool on) { asleepGlow_ = on; }  // the scanner (the setting's old name: glow)
+  void setAsleepGlow(bool on) { asleepGlow_ = on; }
+  void setHearing(bool on) { hearing_ = on; }  // the scanner (the setting's old name: glow)
   void alert(Alert a, uint32_t nowMs);
   void setDance(bool on, uint32_t nowMs);
   bool dancing() const { return dance_; }
@@ -28,15 +30,16 @@ class Leds {
   void printStatus() const;
 
   // Every loop (it draws at most every 25 ms). eyeRgb: the face's colour now (RGB888); level: the voice's
-  // loudness (RMS 0..1) while speaking.
+  // loudness (RMS 0..1) while speaking; heard: the mic's (RMS 0..1), shown while hearing.
   void update(uint32_t nowMs, uint32_t eyeRgb, bool asleep, bool deepSleep, bool thinking, bool speaking,
-              float level);
+              float level, float heard);
 
  private:
   void show(const float rgb[12][3]);
 
   uint8_t brightness_ = 30;
   bool asleepGlow_ = false;
+  bool hearing_ = false;
   Alert alert_ = Alert::None;
   uint32_t alertAt_ = 0;
   bool dance_ = false;
@@ -48,6 +51,7 @@ class Leds {
   float cylon_[6] = {}, cylonHue_ = 0;  // the scanner: each position's light, and its colour
   uint32_t cylonRound_ = UINT32_MAX;
   float meter_ = 0;                  // the voice meter, eased (fast up, slower down)
+  float heard_ = 0;                  // the same for what it hears
   uint32_t nextMs_ = 0;
   uint16_t shown_[12] = {};         // RGB565, as last sent
   bool shownValid_ = false;

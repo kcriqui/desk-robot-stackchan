@@ -304,6 +304,7 @@
         <div class="row">
           <button data-act="wake">Wake up</button>
           <button class="astro" data-act="sleep">Go to sleep</button>
+          <button data-act="poweroff">Power off</button>
         </div>
       </div>
     </aside>
@@ -544,6 +545,9 @@
   document.querySelector('[data-act=dance]').onclick = () => act("dance", {}, NAME + " is dancing");
   document.querySelector('[data-act=wake]').onclick = () => act("sleep", { on: false }, NAME + " is awake");
   document.querySelector('[data-act=sleep]').onclick = () => act("sleep", { on: true }, NAME + " is asleep");
+  document.querySelector('[data-act=poweroff]').onclick = () => {
+    if (confirm(`Power ${NAME} off? Only its power button turns it back on.`)) act("power_off", {}, NAME + " is powering off");
+  };
 
   function slider(into, t, action) {
     const wrap = document.createElement("div"); wrap.className = "tune";
@@ -833,7 +837,8 @@
     track_off: "Stopping", search: "Before a web search", dance: "Before dancing", timer: "A timer is done (with what it's for)",
     timer_plain: "A timer is done", battery_low: "Battery low", battery_very_low: "Battery very low", battery_critical: "Battery critical",
     battery_saved: "Plugged in again", power_off_idle: "Powering off after a long quiet", power_off_idle_timers: "…with a timer still set",
-    power_off_battery: "Powering off, battery empty", power_off_bank: "Powering off, power pack empty", hot: "Running hot", very_hot: "Too hot" };
+    power_off_battery: "Powering off, battery empty", power_off_bank: "Powering off, power pack empty", power_off_confirm: "Asked to power off (wants a yes)",
+    power_off_asked: "Powering off, as asked", hot: "Running hot", very_hot: "Too hot" };
   const VKEYS = ["pitch", "pitch_mode", "intonation", "speed", "noise", "noise_w", "pause", "speaker"];
   function showSpeakers(want) {   // a voice with several speakers (config.py "speakers") picks one
     const list = cstate.meta.speakers?.[$("c-voice").value] || [], sel = $("c-v-speaker");

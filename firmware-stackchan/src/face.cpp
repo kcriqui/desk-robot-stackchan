@@ -328,6 +328,7 @@ void Face::stepAnimation(uint32_t nowMs) {
 
   pop_ *= 0.82f;
   squint_ *= 0.85f;
+  listen_ = approach(listen_, listening_ && !sleepLook() ? 1.0f : 0.0f, 0.2f);
 
   if (sleepLook()) {
     // Slow breathing; the odd dream twitch; Z's drifting up.
@@ -405,6 +406,13 @@ void Face::stepAnimation(uint32_t nowMs) {
       squint_ = 1.0f;
       nextSquintMs_ = nowMs + random(8000, 16000);
     }
+  }
+
+  if (listening_) {  // attentive: at you, not darting about
+    gazeTargetX_ = look.gazeX;
+    gazeTargetY_ = look.gazeY;
+    pupilTargetX_ = pupilTargetY_ = 0;
+    squint_ = 0;
   }
 
   // Flourishes.
@@ -822,6 +830,7 @@ void Face::render() {
   // Height scale: emotion-change overshoot, idle squint, dream twitch.
   float hScale = 1.0f + pop_ * look.pop;
   hScale *= 1.0f - squint_ * 0.4f;
+  hScale *= 1.0f + listen_ * 0.12f;  // hearing you: a little wider
   if (sleepLook()) hScale += twitch_ * 2.5f;  // eyelids flutter open a crack
 
   float leftOuter, rightOuter;

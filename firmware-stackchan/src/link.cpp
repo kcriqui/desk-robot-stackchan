@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-static const char* FW_VERSION = "0.6.9.26";
+static const char* FW_VERSION = "0.6.9.30";
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
@@ -175,6 +175,8 @@ void Link::handleMessage(const char* json) {
     cmd = String("mic ") + ((doc["on"] | false) ? "on" : "off");
   } else if (!strcmp(type, "asleep")) {
     cmd = String("sleep ") + ((doc["on"] | false) ? "on" : "off");
+  } else if (!strcmp(type, "hearing")) {  // the brain hears speech (a turn is open)
+    cmd = String("hearing ") + ((doc["on"] | false) ? "on" : "off");
   } else if (!strcmp(type, "wake_word")) {
     cmd = String("wake ") + ((doc["on"] | false) ? "on" : "off");
   } else if (!strcmp(type, "face")) {

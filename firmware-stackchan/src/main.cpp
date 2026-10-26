@@ -111,6 +111,8 @@ float streamFps = 10.0f;
 // word the robot opens his eyes and streams again, starting with the 2 s
 // before it so the brain hears the whole request.
 bool micWanted = false;
+bool hearing = false;    // the brain hears speech (its `hearing` message); dropped after HEARING_TIMEOUT_MS
+uint32_t hearingAt = 0;
 bool wakeOnRobot = false;
 
 void applyMic() {
@@ -308,6 +310,8 @@ void setDeepSleep(bool on) {
     M5StackChan.setServoPowerEnabled(false);
   } else {
     M5StackChan.setServoPowerEnabled(true);
+    panNeck.resync();  // the head may have drooped while they were off
+    tiltNeck.resync();
     WiFi.setSleep(false);
     M5.Display.wakeup();
     M5.Display.setBrightness(face.asleep() ? max(awakeBrightness / 4, 8) : awakeBrightness);
@@ -330,7 +334,8 @@ void powerOff(const String& why) {
   M5.Display.setFont(&fonts::FreeSans12pt7b);
   M5.Display.drawString("Powering off", M5.Display.width() / 2, M5.Display.height() / 2 - 30);
   M5.Display.setFont(&fonts::FreeSans9pt7b);
-  M5.Display.drawString(why == "battery" ? "Battery almost empty" : "to save the battery",
+  M5.Display.drawString(why == "battery" ? "Battery almost empty" : why == "asked" ? "Goodnight"
+                                                                    : "to save the battery",
                         M5.Display.width() / 2, M5.Display.height() / 2 + 5);
   M5.Display.drawString("Press the power button to wake me", M5.Display.width() / 2,
                         M5.Display.height() / 2 + 35);
@@ -584,6 +589,11 @@ void handleCommand(String line) {
       nextClockBrightMs = 0;
     }
     printScreen();
+  } else if (cmd == "hearing") {  // the brain hears speech: the face and light bars show it
+    hearing = arg == "on";
+    hearingAt = millis();
+    face.setListening(hearing);
+    leds.setHearing(hearing);
   } else if (cmd == "leds") {
     // leds test | dance on|off | alert timer|battery|hot|hush
     uint32_t now = millis();
@@ -667,6 +677,10 @@ void updatePower(uint32_t now) {
     orphanSinceMs = 0;
   } else {
     if (!orphanSinceMs) orphanSinceMs = now | 1;
+    if (!face.asleep() && msSince(now, orphanSinceMs) >= ORPHAN_SLEEP_MS) {
+      Serial.println(F("no brain for 3 min: asleep"));
+      setAsleep(true);
+    }
     if (onBattery() && msSince(now, orphanSinceMs) >= ORPHAN_POWER_OFF_MS) powerOff("no brain");
   }
 }
@@ -726,7 +740,7 @@ void setup() {
   face.setIdle(true);
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.26 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.30 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -797,8 +811,13 @@ void loop() {
                   speaker.lastPrebufferMs(), WiFi.RSSI());
   }
   light.update(now);
+  if (hearing && (msSince(now, hearingAt) > HEARING_TIMEOUT_MS || !brainConnected)) {
+    hearing = false;  // the off went missing (the brain repeats an on every few seconds)
+    face.setListening(false);
+    leds.setHearing(false);
+  }
   leds.update(now, face.eyeColor(), face.asleep(), deepSleep, face.emotion() == Emotion::Thinking,
-              speaker.speaking(), speaker.level());
+              speaker.speaking(), speaker.level(), mic.level());
   updateDark(now);
   static uint32_t proxSeen = 0;
   static uint8_t nearReads = 0;

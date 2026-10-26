@@ -138,6 +138,8 @@ details.""",
         "power_off_battery": "Battery almost empty, {human}! I shut down now. Charge me, then press my side button.",
         "power_off_bank": "Power pack is empty, {human}, and my battery is half gone. I power off now. "
                           "Press my side button to wake me.",
+        "power_off_confirm": "Power off, {human}? Say yes.",
+        "power_off_asked": "Okay. Good night, {human}. Press my side button to wake me.",
         "hot": "{human}, I am hot inside. {temp} degrees. Not danger yet, but watch, please.",
         "very_hot": "Too hot, {human}! {temp} degrees inside. Let me sleep and cool down, please.",
     },
@@ -165,6 +167,8 @@ DEFAULT_LINES = {
     "power_off_battery": "My battery is almost empty. Shutting down now. Charge me, then press my side button.",
     "power_off_bank": "My power pack has run out and my battery is below half, so I'm powering off. Press my side "
                       "button to wake me.",
+    "power_off_confirm": "Power off? Say yes to confirm.",
+    "power_off_asked": "Powering off. Press my side button to wake me.",
     "hot": "{human}, I'm running hot inside: {temp} degrees. Not dangerous yet.",
     "very_hot": "I'm too hot, {human}: {temp} degrees inside. Let me sleep and cool down.",
 }

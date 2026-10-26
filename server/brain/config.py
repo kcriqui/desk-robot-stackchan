@@ -341,6 +341,12 @@ SLEEP_PHRASES = [        # any of these puts him to sleep until the next "hey <n
     "stop listening",
 ]
 # What he says as he goes to sleep: personality.py, LINES.
+POWER_OFF_PHRASES = [    # any of these asks him to power off; he asks for a yes first
+    "power off", "power down", "shut down", "turn off", "switch off",
+    "turn yourself off", "shut yourself down", "power yourself off",
+]
+YES_PHRASES = ["yes", "yeah", "yep", "do it", "go ahead", "confirm", "sure", "yes please", "yes power off"]
+POWER_OFF_CONFIRM_SECONDS = 20.0  # how long the yes may take
 
 # Emotions the firmware knows how to display: firmware/src/face.cpp's seven on
 # the original body; a StackChan (firmware-stackchan/src/face.cpp, from the

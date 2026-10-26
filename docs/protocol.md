@@ -61,6 +61,9 @@ settle. The server takes either type.
                                   // (sent on connect too, so both sides agree)
 {"type": "wake_word", "on": true} // robot-side waking: asleep, the mic sends nothing and the
                                   // robot listens for its wake word itself (sends "wake")
+{"type": "hearing", "on": true}   // firmware-stackchan 0.6.9.27+: the brain hears speech (a turn is open): the
+                                  // light bars fill from the front with the voice, the eyes widen and look ahead.
+                                  // Repeated every 4 s while on; the robot drops it after 10 s without one
 {"type": "mic", "on": true}       // stream the microphone to the server
 {"type": "stream", "on": true, "fps": 10}   // start/stop the camera stream, set rate
 {"type": "face", "save": true, "pack": {...}}  // firmware-stackchan 0.6.1+: a face pack (server/faces/*.json,
