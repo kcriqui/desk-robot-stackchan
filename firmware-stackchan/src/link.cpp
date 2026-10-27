@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-static const char* FW_VERSION = "0.6.9.48";
+static const char* FW_VERSION = "0.6.10.0";
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
@@ -124,7 +124,6 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
       doc["token"] = token_;  // the brain drops connections without it
       if (wakeWord_) doc["wake"] = wakeWord_;
       if (asleep_) doc["asleep"] = asleep_();
-      if (duplex_ && duplex_()) doc["duplex"] = true;  // it can send the echo reference (0x04 frames)
       String out;
       serializeJson(doc, out);
       sendJson(out);
@@ -168,12 +167,12 @@ void Link::handleMessage(const char* json) {
     cmd = String(type) + " " + String(doc["deg"] | 0.0f, 1);
   } else if (!strcmp(type, "speak_begin")) {
     cmd = String("speak_begin ") + String(doc["bytes"] | 0);
-  } else if (!strcmp(type, "speak_end") || !strcmp(type, "speak_stop")) {
+  } else if (!strcmp(type, "speak_end")) {
     cmd = type;
   } else if (!strcmp(type, "volume")) {
     cmd = String("volume ") + String(doc["level"] | 0.5f, 2);
   } else if (!strcmp(type, "mic")) {
-    cmd = String("mic ") + ((doc["on"] | false) ? "on" : "off") + ((doc["ref"] | false) ? " ref" : "");
+    cmd = String("mic ") + ((doc["on"] | false) ? "on" : "off");
   } else if (!strcmp(type, "asleep")) {
     cmd = String("sleep ") + ((doc["on"] | false) ? "on" : "off");
   } else if (!strcmp(type, "hearing")) {  // the brain hears speech (a turn is open)

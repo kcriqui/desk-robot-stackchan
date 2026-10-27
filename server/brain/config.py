@@ -307,22 +307,6 @@ CANCEL_MIN_SPEECH = 0.3
 # An utterance that's only these is ignored: speech-to-text writes a throat clear or a cough as one of them.
 FILLER_SOUNDS = {"hmm", "hm", "hmmm", "mm", "mmm", "mhm", "uh", "um", "umm", "uhh", "ah", "ahh", "oh", "huh", "er",
                  "erm", "ahem", "eh"}
-# Hearing while it talks (echo.py; firmware-stackchan 0.6.9.41+ with duplex): the robot sends its mic with the
-# echo reference while its speaker plays, and the brain takes its own voice out instead of muting the mic. Off:
-# the mic is muted while it talks, as before.
-ECHO_CANCEL = os.environ.get("ECHO_CANCEL", "0") not in ("", "0")  # off until it's tuned on the robot
-# Talking over it stops it (needs ECHO_CANCEL): your speech for BARGE_IN_SECONDS over its voice.
-BARGE_IN = os.environ.get("BARGE_IN", "1") not in ("", "0")
-BARGE_IN_SECONDS = 0.4
-# While it talks, sound counts only this many dB above the echo left after cancelling: below, the ears hear
-# silence (what's left of its own voice mustn't open a turn). Raise if it hears itself, lower if it misses you.
-ECHO_NEAR_DB = 6.0
-ECHO_STEP = 0.5       # the canceller's learning rate (0-1)
-ECHO_SUPPRESS = 2.0   # the residual suppressor's over-subtraction: higher takes out more echo, and more of you
-ECHO_FLOOR = 0.05     # ...but never down more than this (gain per frequency: 0.05 = -26 dB)
-# Keep the raw mic + reference of each reply in data/echo (the last 20), for tuning the canceller offline. On its
-# own (ECHO_CANCEL off) the robot still sends the reference while it talks; the mic stays muted meanwhile.
-RECORD_ECHO = os.environ.get("RECORD_ECHO", "1") not in ("", "0")
 AWAKE_SECONDS = 60.0     # after "hey Rocky" he stays awake; each thing you say
                          # resets this clock, and when it runs out he dozes off
 DOZE_HOLD_SECONDS = 20.0  # ...unless he's hearing speech: then he waits up to this

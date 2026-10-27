@@ -103,7 +103,6 @@ FRAME_BYTES = 3200  # 100 ms of 16 kHz s16le per audio frame to the robot
 # What the live-view console shows and can change (see console_state / console_command).
 current_emotion = "neutral"
 speaker_volume = 0.7        # mirrors firmware SPEAKER_VOLUME until changed here
-robot_duplex = False        # the robot hears while it talks (firmware 0.6.9.41+): it can send the echo reference
 thinking = False            # a reply is being composed (before it's spoken)
 TUNABLE = {                 # config knobs the console may change live: (min, max)
     "VAD_THRESHOLD": (0.1, 0.95),
@@ -216,8 +215,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     except ValueError:
         robot_fw = (0, 0, 0)
     print(f"robot connected! (fw {hello.get('fw', '?')}, {peer})")
-    global robot_wake_word, robot_asleep, powering_off, powered_off, robot_deep_sleep, robot_duplex
-    robot_duplex = bool(hello.get("duplex"))
+    global robot_wake_word, robot_asleep, powering_off, powered_off, robot_deep_sleep
     powering_off = False  # it powered back on (or never went)
     powered_off = None
     robot_deep_sleep = False
@@ -239,7 +237,8 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     elif robot_wake_word and time.time() >= awake_until:
         robot_asleep = True  # not in a conversation: let the robot do the listening
     pick_mic_source()
-    await send_mic()
+    if config.MIC_SOURCE in ("auto", "robot"):
+        await send_to_robot({"type": "mic", "on": True})
     await apply_camera()
     if offered:  # older firmware doesn't know the message
         await send_to_robot({"type": "wake_word", "on": bool(robot_wake_word)})
@@ -260,8 +259,6 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
                 kind = message[:1]
                 if kind == b"\x01" and ears is not None and len(message) % 2 == 1:
                     ears.push_audio(message[1:])  # 1 type byte + whole 16-bit samples
-                elif kind == b"\x04" and ears is not None:
-                    ears.push_echo(message[1:])  # the mic with the echo reference, while it talks
                 elif kind == b"\x02":
                     eyes.push_frame(message[1:])
                 elif kind == b"\x03" and len(message) > 5:
@@ -319,9 +316,6 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         if robot_socket is websocket:
             robot_socket = None
             robot_wake_word = None
-            robot_duplex = False
-            if ears is not None:
-                ears.cancel_echo = False
             print("robot disconnected")
             pick_mic_source()
 
@@ -433,17 +427,6 @@ async def handle_console_line(line: str) -> bool:
 
 
 # ── Rocky's abilities (called by the brain, from its worker thread) ──────────
-
-async def send_mic() -> None:
-    """Stream the robot's mic (unless the computer's is the one to use), with the echo reference while it talks if
-    it can send one and echo cancelling is on: then the ears take its voice out instead of muting."""
-    cancel = robot_duplex and config.ECHO_CANCEL
-    if ears is not None:
-        ears.cancel_echo = cancel
-    ref = robot_duplex and (config.ECHO_CANCEL or config.RECORD_ECHO)  # recording it for tuning, at least
-    if config.MIC_SOURCE in ("auto", "robot"):
-        await send_to_robot({"type": "mic", "on": True, **({"ref": True} if ref else {})})
-
 
 async def apply_camera() -> None:
     """Full-rate frames while following a face or looking around, else just
@@ -1560,7 +1543,6 @@ async def start_listening() -> None:
         ears.has_wake_word = lambda text: (
             _robot_wake_word_in(text) is not None if robot_woke_at else
             wakewords.match(text, _phrases(), loose=bool(kw_woke_at)) is not None)
-        ears.cancel_echo = robot_duplex and config.ECHO_CANCEL  # the robot may have connected first
         mic = await loop.run_in_executor(None, ears.start)
     except Exception as e:
         ears = None
@@ -1849,8 +1831,6 @@ async def change_setting(section: str, key: str, value) -> dict:
         asyncio.create_task(send_clock())  # the time zone and style, then the weather (fetched)
     elif section in ("screen", "leds") or key in ("near_stop", "near_level", "power_bank"):
         await send_screen()
-    elif section == "listening" and key == "echo_cancel":
-        await send_mic()
     elif section == "listening" and ears is not None:
         ears.apply_config()
     elif section == "wake" and key in ("words", "spotter"):
@@ -1916,29 +1896,6 @@ async def power_off(key: str) -> None:
     await send_to_robot({"type": "power_off", "why": why})
     powered_off = (why, time.time())
     awake_until = 0.0  # the goodbye kept him "awake"; he's off
-
-
-async def barge_loop() -> None:
-    """Talking over it stops it (BARGE_IN, with the echo cancelled): your speech for BARGE_IN_SECONDS while it gives a
-    reply stops the speaker and drops the rest, as a hand over its sensor does; then it listens to the rest of you."""
-    global awake_until
-    since = None
-    while True:
-        await asyncio.sleep(0.05)
-        live = (config.BARGE_IN and ears is not None and ears.cancel_echo and ears.muted.is_set()
-                and speaking_reply is not None and robot_socket is not None)
-        if not live or not ears.hearing:
-            since = None
-            continue
-        now = time.time()
-        since = since or now
-        if ears.talking and now - since >= config.BARGE_IN_SECONDS:
-            print(f"(talked over: it stops; near {ears.echo_near:.0f} dB)")
-            since = None
-            awake_until = now + config.AWAKE_SECONDS
-            await send_to_robot({"type": "speak_stop"})
-            if speaking_reply is not None:
-                speaking_reply.stop()
 
 
 async def hearing_loop() -> None:
@@ -2222,7 +2179,6 @@ async def main() -> None:
         head_task = asyncio.create_task(head_loop())
         watch_task = asyncio.create_task(watch_loop())
         hearing_task = asyncio.create_task(hearing_loop())
-        barge_task = asyncio.create_task(barge_loop())
         touch_task = asyncio.create_task(touch_loop())
         idle_task = asyncio.create_task(body.idle_loop())  # small head moves while he waits for you
         if config.LISTEN_ON_START:
@@ -2235,7 +2191,6 @@ async def main() -> None:
             head_task.cancel()
             watch_task.cancel()
             hearing_task.cancel()
-            barge_task.cancel()
             touch_task.cancel()
             idle_task.cancel()
             if ears is not None:

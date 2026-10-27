@@ -3,7 +3,6 @@
 #include <Arduino.h>
 #include <functional>
 
-class Duplex;
 class Mic;
 
 // Speaker: plays 16 kHz mono s16le PCM through the CoreS3's AW88298 amp.
@@ -11,8 +10,7 @@ class Mic;
 // The brain streams a whole reply as binary WebSocket frames. They land in a
 // big ring buffer in PSRAM; a playback task drains it into M5Unified's
 // speaker queue. A short pre-buffer hides WiFi jitter at the start of a line.
-// The mic shares the I2S bus, so the playback task borrows it for each line; with Duplex (duplex.h) running it
-// queues the samples for the bus instead, which plays and records at once.
+// The mic shares the I2S bus, so the playback task borrows it for each line.
 //
 //   beginSpeech()  → reset the buffer, start waiting for audio
 //   feed(pcm, n)   → append audio (any chunk size)
@@ -23,7 +21,7 @@ class Speaker {
  public:
   using DoneHandler = std::function<void()>;
 
-  void begin(Mic* mic, float volume, DoneHandler onDone = nullptr, Duplex* duplex = nullptr);
+  void begin(Mic* mic, float volume, DoneHandler onDone = nullptr);
   // expectedBytes: total size of the reply if the brain knows it (0 = unknown).
   // Playback starts once that much (capped at ~1 s) has arrived.
   void beginSpeech(size_t expectedBytes = 0);
@@ -35,7 +33,7 @@ class Speaker {
   bool speaking() const { return speaking_; }
   void setVolume(float v);
   // Loudness (RMS 0..1) of the audio being played right now; 0 when silent.
-  float level() const;
+  float level() const { return speaking_ ? level_ : 0.0f; }
 
   // Diagnostics for the last line played: times the buffer ran dry mid-line,
   // bytes buffered before playback started, ms spent waiting for that.
@@ -52,10 +50,8 @@ class Speaker {
   void task();
   size_t available() const;
   size_t readInto(uint8_t* out, size_t maxLen);
-  float duplexGain() const;  // the samples' scale for the volume, in duplex
 
   Mic* mic_ = nullptr;
-  Duplex* duplex_ = nullptr;
   uint8_t* ring_ = nullptr;
   size_t ringSize_ = 0;
   volatile size_t head_ = 0;  // write index

@@ -5,9 +5,6 @@ Two possible microphones feed the same pipeline: the Mac's (sounddevice
 stream) or the robot's PDM mic, whose frames arrive over the WebSocket and
 are handed in through push_audio(). `source` picks which one is live.
 
-With the robot's mic and echo cancelling on (echo.py), what it hears while it talks comes with the echo reference
-and has its own voice taken out first (push_echo); otherwise the ears are muted while it talks.
-
 Pipeline:  mic blocks → Segmenter (Silero VAD + Smart Turn, see turn.py) →
 Transcriber (Parakeet, faster-whisper or Moonshine, local, no cloud) → on_utterance(text, ...)
 The same blocks also go, on a thread of their own, to the wake-word spotter
@@ -34,7 +31,6 @@ from collections.abc import Callable
 import numpy as np
 
 from . import config
-from .echo import EchoCanceller
 from .turn import VAD_CHUNK, SileroVAD, SmartTurn
 from .wakewords import clean
 
@@ -343,41 +339,6 @@ class _Recorder:
             os.remove(os.path.join(config.RECORD_DIR, f))
 
 
-class _EchoTape:
-    """config.RECORD_ECHO: the raw mic and echo reference of each stretch the robot talked, as a stereo WAV in
-    data/echo (the last 20), for tuning the canceller offline."""
-
-    KEEP = 20
-
-    def __init__(self) -> None:
-        self.dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "echo")
-        self.parts: list[bytes] = []
-
-    def add(self, interleaved: bytes) -> None:
-        if config.RECORD_ECHO and len(self.parts) < 3000:  # 90 s at most
-            self.parts.append(interleaved)
-
-    def close(self) -> None:
-        if not self.parts:
-            return
-        data, self.parts = b"".join(self.parts), []
-        if len(data) < 16000 * 4:  # under a second: nothing to learn from
-            return
-        try:
-            import wave
-
-            os.makedirs(self.dir, exist_ok=True)
-            with wave.open(os.path.join(self.dir, time.strftime("%Y%m%d-%H%M%S") + ".wav"), "wb") as w:
-                w.setnchannels(2)
-                w.setsampwidth(2)
-                w.setframerate(SAMPLE_RATE)
-                w.writeframes(data)
-            for old in sorted(f for f in os.listdir(self.dir) if f.endswith(".wav"))[:-self.KEEP]:
-                os.remove(os.path.join(self.dir, old))
-        except OSError as e:
-            print(f"(echo recording: {e})")
-
-
 class Ears:
     """Owns the microphone stream and a worker thread. Calls
     on_utterance(text, started_at, ended_at) from the worker thread for every
@@ -404,14 +365,7 @@ class Ears:
         self.device = device
         self.device_name = "?"
         self.mac_error: str | None = None  # why the Mac mic could not be opened, if it couldn't
-        self.muted = threading.Event()  # set while Rocky is talking: the mic is muted unless cancel_echo
-        # main.py: the robot sends the echo reference while it talks (it runs duplex) and ECHO_CANCEL is on. Then
-        # nothing is muted: its voice is taken out (push_echo) and what's left of it is kept from the turns.
-        self.cancel_echo = False
-        self.echo = EchoCanceller()
-        self.echo_near = 99.0           # echo.near of the latest block (dB; 99 = no echo about)
-        self._echo_at = 0.0             # when the last 0x04 frame came
-        self._echo_tape = _EchoTape()
+        self.muted = threading.Event()  # set while Rocky is talking (no echo cancel)
         self.source = "mac"             # "mac" or "robot": whose audio is live
         self.level = 0.0                # RMS of the latest live block (for `mic`)
         self._blocks: queue.Queue[np.ndarray | None] = queue.Queue()
@@ -462,45 +416,9 @@ class Ears:
 
     def push_audio(self, pcm16: bytes) -> None:
         """Robot mic frame (16 kHz mono s16le) from the WebSocket."""
-        if self.source != "robot" or (self.muted.is_set() and not self.cancel_echo):
+        if self.source != "robot" or self.muted.is_set():
             return
         block = np.frombuffer(pcm16, dtype=np.int16).astype(np.float32) / 32768.0
-        if self._echo_at:  # the echo frames have stopped: it's done talking
-            self._echo_at = 0.0
-            self._echo_tape.close()
-        if self.cancel_echo:
-            # Through the canceller with no reference (it passes it through, a block late) so the audio stays
-            # continuous when the echo frames start and stop.
-            block = self.echo.process(block, np.zeros_like(block))
-            self.echo_near = 99.0
-        self._listen(block)
-
-    def push_echo(self, payload: bytes) -> None:
-        """Robot mic frame with the echo reference (0x04, docs/protocol.md): a little-endian uint16 gain (x256),
-        then the mic (raw) and the reference interleaved, s16le. The robot's voice is taken out, then the gain
-        applied; while there's echo about and no turn is open, a block that isn't clearly something else is heard
-        as silence (what's left of its voice mustn't start a turn; once you've started, all of you is kept)."""
-        if self.source != "robot" or len(payload) < 6 or (len(payload) - 2) % 4:
-            return
-        now = time.time()
-        if now - self._echo_at > 1.0:
-            self._echo_tape.close()
-            self.echo.reset()  # a gap: forget the old reference, keep the learnt echo path
-        self._echo_at = now
-        gain = int.from_bytes(payload[:2], "little") / 256.0
-        self._echo_tape.add(payload[2:])
-        pcm = np.frombuffer(payload[2:], dtype=np.int16).astype(np.float32).reshape(-1, 2) / 32768.0
-        if not self.cancel_echo:  # only recorded: muted while it talks, as before; its echo tail heard as it is
-            if not self.muted.is_set():
-                self._listen(np.clip(pcm[:, 0] * gain, -1.0, 1.0))
-            return
-        block = self.echo.process(pcm[:, 0], pcm[:, 1])
-        self.echo_near = self.echo.near
-        if self.echo_near < config.ECHO_NEAR_DB and not self.hearing:
-            block = np.zeros_like(block)
-        self._listen(np.clip(block * gain, -1.0, 1.0))
-
-    def _listen(self, block: np.ndarray) -> None:
         block = self._highpass.process(block)
         self.level = float(np.sqrt(np.mean(block * block)))
         self._blocks.put(block)

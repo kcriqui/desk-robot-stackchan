@@ -17,8 +17,6 @@ The rest of the frame is the payload.
 {"type": "hello", "who": "desk-robot", "fw": "0.4.1", "token": "...", "wake": "computer"}  // must be the first message; token = ROBOT_TOKEN.
                                   // "wake": the wake word the robot can listen for itself (firmware-stackchan with a model)
                                   // "asleep": whether its eyes are shut, so a restarted brain keeps the state
-                                  // "duplex": true (firmware-stackchan 0.6.9.41+): it hears while it talks and can
-                                  // send the echo reference (0x04 frames below)
 {"type": "state", "pan": 12.5, "emotion": "neutral"}
 {"type": "temp", "c": 52.0}       // chip temperature, sent every ~10 s
 {"type": "battery", "v": 3.92, "ma": 410, "deep": false}  // firmware-stackchan: battery volts and mA (+ discharging,
@@ -37,12 +35,6 @@ The rest of the frame is the payload.
 
 Binary `0x01` frames: microphone audio, 16 kHz mono signed 16-bit PCM,
 little-endian, 30 ms (480 samples) per frame.
-
-Binary `0x04` frames (firmware-stackchan 0.6.9.41+, when the brain asked with `mic` + `ref`): while its speaker
-plays and for 600 ms after, the mic with the echo reference (the speaker amp's output, recorded in the same
-instant). Payload: a little-endian uint16 gain x256 (what makes the raw mic as loud as a 0x01 frame), then 480
-frames of two interleaved s16le channels: the mic (raw, at the lower duplex PGA) and the reference. The brain
-takes the robot's voice out (server/brain/echo.py), then applies the gain.
 
 Touch messages (firmware-stackchan 0.6.9.33+; see firmware-stackchan/src/touch_gestures.h):
 `{"type": "touch", "g": "tap", "zones": 3, "level": 2, "ms": 120}`, `"swipe"` with `"dir"`, `"hold"` with `"s"`
@@ -68,7 +60,6 @@ settle. The server takes either type.
 {"type": "tilt", "deg": 15}
 {"type": "speak_begin", "bytes": 0}      // binary TTS audio frames follow; bytes = total if known, 0 = streaming (robot starts after 200 ms of audio)
 {"type": "speak_end"}             // no more audio; robot replies speak_done when played out
-{"type": "speak_stop"}            // 0.6.9.41+: stop now, mid-line (you talked over it); it replies speak_done
 {"type": "volume", "level": 0.4}  // speaker volume 0.0-1.0
 {"type": "asleep", "on": true}    // eyes shut + Z's; false = wake up. firmware-stackchan also pauses the camera stream and dims the screen
                                   // (sent on connect too, so both sides agree)
@@ -77,8 +68,7 @@ settle. The server takes either type.
 {"type": "hearing", "on": true}   // firmware-stackchan 0.6.9.27+: the brain hears speech (a turn is open): the
                                   // light bars fill from the front with the voice, the eyes widen and look ahead.
                                   // Repeated every 4 s while on; the robot drops it after 10 s without one
-{"type": "mic", "on": true}       // stream the microphone to the server; "ref": true (0.6.9.41+, duplex): with
-                                  // the echo reference while it talks (0x04 frames)
+{"type": "mic", "on": true}       // stream the microphone to the server
 {"type": "stream", "on": true, "fps": 10}   // start/stop the camera stream, set rate
 {"type": "face", "save": true, "pack": {...}}  // firmware-stackchan 0.6.1+: a face pack (server/faces/*.json,
                                   // minus its description); save = keep it in flash. Sent on connect.

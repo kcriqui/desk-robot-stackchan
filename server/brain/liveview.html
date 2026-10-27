@@ -675,11 +675,6 @@
       ["wake", "spotter", "Keyword spotter too", "opens its eyes mid-sentence; off: on your voice it caught 5 of 14 wake words and misfired on ordinary speech. The transcript wakes it either way", "check"],
       ["wake", "record", "Keep recordings", "every utterance, in server/data/recordings, for tuning the wake words and comparing speech-to-text (kept here only)", "check"],
     ]],
-    ["Hearing while it talks", "firmware 0.6.9.41+", [
-      ["listening", "echo_cancel", "Cancel its echo", "it listens while it talks, its own voice taken out; off: its mic is muted while it talks", "check"],
-      ["listening", "barge_in", "Talking over it stops it", "needs the echo cancelled", "check"],
-      ["listening", "ECHO_NEAR_DB", "Over its voice, you count above", "dB above what's left of its echo: raise if it hears itself, lower if it misses you", "range:0:30"],
-    ]],
     ["Clock screen", "while it sleeps on USB", [
       ["clock", "h24", "24-hour clock", "", "check"],
       ["clock", "timezone", "Time zone", "", "zone"],

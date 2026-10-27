@@ -29,8 +29,6 @@ class Link {
   // Also in the hello: whether his eyes are shut, so a restarted brain
   // carries on where the robot is instead of putting him to sleep.
   void setAsleepSource(std::function<bool()> f) { asleep_ = std::move(f); }
-  // And whether the audio bus runs both ways (duplex.h): the brain can then cancel the echo and hear it talked over.
-  void setDuplexSource(std::function<bool()> f) { duplex_ = std::move(f); }
 
   // Call every loop().
   void update(uint32_t nowMs);
@@ -40,7 +38,7 @@ class Link {
   // Robot → server. Text is sent as-is (should be JSON).
   void sendJson(const String& json);
   void sendState(float panDeg, const char* emotion);
-  // Binary frame: one type byte (0x01 = mic audio, 0x02 = JPEG, 0x04 = mic + echo reference) + payload.
+  // Binary frame: one type byte (0x01 = mic audio, 0x02 = JPEG) + payload.
   void sendBinary(uint8_t type, const uint8_t* data, size_t len);
 
  private:
@@ -62,5 +60,4 @@ class Link {
   uint32_t nextStateMs_ = 0;
   const char* wakeWord_ = nullptr;
   std::function<bool()> asleep_;
-  std::function<bool()> duplex_;
 };
