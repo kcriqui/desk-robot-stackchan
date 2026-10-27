@@ -23,6 +23,7 @@
 #include "servo_neck.h"
 #include "speaker.h"
 #include "touch_gestures.h"
+#include "duplex.h"
 
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -50,6 +51,7 @@ Link brainLink;
 TouchGestures touch;  // the head's touch strip, as gestures for the brain
 Speaker speaker;
 Mic mic;
+Duplex duplex;  // the audio bus both ways (duplex.h); the mic task opens it
 Wake wake;
 Camera camera;
 ClockScreen clockScreen;
@@ -88,14 +90,14 @@ void printDiag(uint32_t nowMs) {
   uint32_t encMax = 0;
   camera.takeEncodeStats(encAvg, encMax);
   Serial.printf("diag: heap %u KB (min %u, block %u) psram %u KB | worst ms: loop %u link %u send %u face %u neck %u"
-                " | cam %.1f fps (grab+encode avg %.0f ms, max %u) sent %.1f fps | wifi %d dBm %s\n",
+                " | cam %.1f fps (grab+encode avg %.0f ms, max %u) sent %.1f fps | wifi %d dBm %s | faint touches %lu\n",
                 heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
                 heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024,
                 heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024,
                 heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
                 diag.loop / 1000, diag.link / 1000, diag.send / 1000, diag.face / 1000, diag.neck / 1000,
                 (captured - lastCaptured) / 5.0f, encAvg, encMax, diag.framesSent / 5.0f, WiFi.RSSI(),
-                brainLink.connected() ? "brain up" : "brain DOWN");
+                brainLink.connected() ? "brain up" : "brain DOWN", static_cast<unsigned long>(touch.faintCount()));
   lastCaptured = captured;
   diag = Diag{};
 }
@@ -415,6 +417,7 @@ void printHelp() {
   Serial.println(F("  volume <0-1> speaker volume"));
   Serial.println(F("  beep         play a test tone through the speaker"));
   Serial.println(F("  mic on|off   stream the microphone to the brain"));
+  Serial.println(F("  duplex [on|off]  hear while talking (the next restart), or its state; pga <reg> its mic gain"));
   Serial.println(F("  miclevel     print mic level for 3 s (talk to it)"));
   Serial.println(F("  stream on|off [fps]  stream camera JPEGs to the brain"));
   Serial.println(F("  snap         grab one frame and report its size"));
@@ -516,7 +519,9 @@ void handleCommand(String line) {
     heap_caps_free(tone);
     Serial.println(F("beep"));
   } else if (cmd == "mic") {
-    micWanted = (arg == "on");
+    // mic on|off [ref]: ref = the brain cancels the echo itself (0x04 frames while it talks)
+    micWanted = arg.startsWith("on");
+    mic.setRefWanted(micWanted && arg.endsWith(" ref"));
     applyMic();
     Serial.printf("mic %s%s\n", micWanted ? "on" : "off",
                   micWanted && !mic.streaming() ? " (asleep: the wake word engine listens)" : "");
@@ -621,6 +626,23 @@ void handleCommand(String line) {
       nextClockBrightMs = 0;
     }
     printScreen();
+  } else if (cmd == "duplex") {
+    // duplex on|off: the mic and speaker at once (duplex.h), from the next restart; no argument: the state
+    if (arg == "on" || arg == "off") {
+      duplex.save(arg == "on");
+      Serial.printf("duplex: %s from the next restart\n", arg.c_str());
+    } else {
+      Serial.printf("duplex: %s, %s; mic PGA 0x%02X (x%.1f in software); %lu underruns, %lu overflows\n",
+                    duplex.wanted() ? "wanted" : "off", duplex.running() ? "running" : "not running",
+                    duplex.micPga(), duplex.micScale(), static_cast<unsigned long>(duplex.underruns()),
+                    static_cast<unsigned long>(duplex.overflows()));
+    }
+  } else if (cmd == "pga") {  // pga <reg>: the mics' PGA in duplex, 0x10 (0 dB) to 0x1E, until a restart
+    if (duplex.running() && !arg.isEmpty()) duplex.setMicPga(static_cast<uint8_t>(strtol(arg.c_str(), nullptr, 0)));
+    Serial.printf("pga: 0x%02X (x%.1f in software)%s\n", duplex.micPga(), duplex.micScale(),
+                  duplex.running() ? "" : "; duplex isn't running");
+  } else if (cmd == "speak_stop") {  // the brain heard you talk over it: stop now (it drops the rest)
+    if (speaker.speaking()) speaker.stop();
   } else if (cmd == "hearing") {  // the brain hears speech: the face and light bars show it
     hearing = arg == "on";
     hearingAt = millis();
@@ -729,6 +751,8 @@ void setup() {
 
   // M5Unified, the IO expander (servo power, LEDs), head touch, servos.
   M5StackChan.begin();
+  // The head strip duller than the BSP's (Type_Low, level 3): it reads phantom touches by itself.
+  M5StackChan.TouchSensor.setSensitivity(SI12T_Type_Low, static_cast<SI12T_Sensitivity_Level>(TOUCH_SENSITIVITY));
   // After a full power-off the light bars come up showing whatever is in the LED
   // driver's memory: dark until leds.update() draws them.
   M5StackChan.showRgbColor(0, 0, 0);
@@ -748,7 +772,8 @@ void setup() {
   panNeck.begin(ServoNeck::Axis::Pan, PAN_MIN_DEG, PAN_MAX_DEG, PAN_SPEED, PAN_INVERT);
   tiltNeck.begin(ServoNeck::Axis::Tilt, TILT_MIN_DEG, TILT_MAX_DEG, TILT_SPEED, TILT_INVERT, TILT_REST_DEG);
 
-  mic.begin(MIC_GAIN);
+  duplex.load();
+  mic.begin(MIC_GAIN, &duplex);
   if (wake.begin("spiffs", WAKE_MODEL)) {
     mic.setTap([](const int16_t* s, size_t n) { wake.push(s, n); });
 #if HAVE_BRAIN
@@ -757,8 +782,9 @@ void setup() {
   }
 #if HAVE_BRAIN
   brainLink.setAsleepSource([]() { return face.asleep(); });
+  brainLink.setDuplexSource([]() { return duplex.running(); });
 #endif
-  speaker.begin(&mic, SPEAKER_VOLUME, []() { speakDonePending = true; });
+  speaker.begin(&mic, SPEAKER_VOLUME, []() { speakDonePending = true; }, &duplex);
   // Last: it borrows the internal I2C bus the others set up on.
   if (camera.begin()) Serial.println(F("camera: ready"));
   // Each frame is tagged with the head's actual angle (read from the servos),
@@ -773,7 +799,7 @@ void setup() {
   face.setIdle(true);
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.34 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.9.48 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -885,12 +911,15 @@ void loop() {
     setAsleep(false);
   }
   {
-    static uint8_t frame[Mic::FRAME_BYTES];
+    static uint8_t frame[Mic::MAX_FRAME_BYTES];
     while (brainLink.connected() && mic.nextPreroll(frame)) {
-      brainLink.sendBinary(0x01, frame, sizeof(frame));
+      brainLink.sendBinary(0x01, frame, Mic::FRAME_BYTES);
     }
-    while (brainLink.connected() && mic.nextFrame(frame)) {
-      brainLink.sendBinary(0x01, frame, sizeof(frame));
+    size_t len = 0;
+    while (brainLink.connected()) {
+      uint8_t type = mic.nextFrame(frame, len);
+      if (type == 0) break;
+      brainLink.sendBinary(type, frame, len);
     }
   }
   if (brainLink.connected() && camera.streaming()) {

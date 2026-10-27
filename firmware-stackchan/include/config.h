@@ -50,6 +50,14 @@ constexpr bool SERVO_AUTO_RELAX = true;
 // Raise if the brain says "too quiet", lower if loud speech clips.
 constexpr float MIC_GAIN = 1.0f;
 
+// Full duplex (duplex.h): the mics' and the echo reference's PGA, in ES7210 register steps (0x10 = 0 dB, 3 dB a
+// step; M5Unified uses 0x1B). Lower than M5Unified's so the speaker's echo doesn't clip the mics; the lost gain is
+// made up in software. `pga <reg>` over serial tries another until a restart.
+constexpr uint8_t DUPLEX_MIC_PGA = 0x13;  // +9 dB
+constexpr uint8_t DUPLEX_REF_PGA = 0x10;  // 0 dB
+// How long after the speaker last played the mic still streams with the echo reference (the room's echo dies away).
+constexpr uint32_t DUPLEX_REF_TAIL_MS = 600;
+
 // ─── Wake word ───────────────────────────────────────────────────────────────
 // The robot can listen for its wake word itself (esp-sr WakeNet), so that
 // asleep it sends no audio until it hears it. The model comes from
@@ -69,8 +77,17 @@ constexpr int CAMERA_JPEG_QUALITY = 60;  // 1-100, higher = better (~8-15 KB QVG
 constexpr bool CAMERA_VFLIP = false;
 constexpr bool CAMERA_HMIRROR = false;
 
+// ─── Head touch ──────────────────────────────────────────────────────────────
+// The strip's intensity (1-3) a touch must reach to count: alone it reads phantom 1s, real pats reach 2-3.
+constexpr uint8_t TOUCH_MIN_LEVEL = 2;
+// The strip chip's own sensitivity, 0 (most sensitive) to 7; the BSP sets 3.
+constexpr uint8_t TOUCH_SENSITIVITY = 5;
+
 // ─── Speaker ─────────────────────────────────────────────────────────────────
 constexpr float SPEAKER_VOLUME = 0.7f;  // 0.0-1.0
+// Full duplex: the loudest the speaker plays (as a fraction of full scale), so the little speaker doesn't distort:
+// distortion is echo the brain's canceller can't take out. Volume 1.0 with M5Unified is about 0.49.
+constexpr float DUPLEX_MAX_GAIN = 0.49f;
 
 // ─── Face ────────────────────────────────────────────────────────────────────
 // The face's colours come from its face pack (server/faces/*.json, sent by

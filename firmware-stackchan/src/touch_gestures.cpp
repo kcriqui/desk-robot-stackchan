@@ -1,5 +1,7 @@
 #include "touch_gestures.h"
 
+#include "config.h"
+
 // A touch counts as lifted after this long with no zone reading (the sensor can drop a reading mid-touch).
 static const uint32_t RELEASE_MS = 80;
 // Longer than this is no tap; resting this long is a hold, and this long again the long one.
@@ -7,6 +9,15 @@ static const uint32_t TAP_MAX_MS = 600, HOLD_MS = 1000, LONG_HOLD_MS = 3000;
 
 void TouchGestures::update(uint32_t now, const std::array<uint8_t, 3>& levels, int swiped, const Send& send) {
   uint8_t level = max(levels[0], max(levels[1], levels[2]));
+  // A touch starts at TOUCH_MIN_LEVEL; once started, any reading keeps it going. The strip reads phantom level-1
+  // touches by itself (dozens a night, 75-260 ms each), and two close together were a double tap: it woke.
+  if (!down_ && level > 0 && level < TOUCH_MIN_LEVEL) {
+    if (!faint_) ++faintCount_;  // a new faint reading (not every loop of one)
+    faint_ = true;
+    level = 0;
+  } else if (level == 0) {
+    faint_ = false;
+  }
   if (level > 0) {
     if (!down_) {
       down_ = true;
@@ -30,13 +41,18 @@ void TouchGestures::update(uint32_t now, const std::array<uint8_t, 3>& levels, i
 
   if (level > 0) {  // still touching: a hand resting there (not stroking) is a hold
     uint32_t held = now - downAt_;
+    char msg[96];
     if (!swiped_ && holdSent_ < 1 && held >= HOLD_MS) {
       holdSent_ = 1;
-      send("{\"type\":\"touch\",\"g\":\"hold\",\"s\":1}");
+      snprintf(msg, sizeof msg, "{\"type\":\"touch\",\"g\":\"hold\",\"s\":1,\"zones\":%u,\"level\":%u}",
+               static_cast<unsigned>(zones_), static_cast<unsigned>(maxLevel_));
+      send(msg);
     }
     if (!swiped_ && holdSent_ < 3 && held >= LONG_HOLD_MS) {
       holdSent_ = 3;
-      send("{\"type\":\"touch\",\"g\":\"hold\",\"s\":3}");
+      snprintf(msg, sizeof msg, "{\"type\":\"touch\",\"g\":\"hold\",\"s\":3,\"zones\":%u,\"level\":%u}",
+               static_cast<unsigned>(zones_), static_cast<unsigned>(maxLevel_));
+      send(msg);
     }
     return;
   }

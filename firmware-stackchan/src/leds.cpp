@@ -111,7 +111,7 @@ void Leds::update(uint32_t nowMs, uint32_t eye, bool asleep, bool deepSleep, boo
           for (int j = 0; j < 3; ++j) out[ledIndex(side, p)][j] = lit[j];
       }
   } else if (speaking) {  // a level meter: both bars fill from the back with the voice
-    float want = constrain(level * 7.0f, 0.0f, 1.0f);
+    float want = constrain(level * 5.0f, 0.0f, 1.0f);  // 7 pinned them full on loud syllables
     meter_ = want > meter_ ? meter_ + (want - meter_) * 0.6f : meter_ + (want - meter_) * 0.15f;
     float lit = meter_ * PER_BAR;
     for (int side = 0; side < 2; ++side)

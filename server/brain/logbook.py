@@ -1,29 +1,67 @@
-"""The brain's recent output, for the live view's Log tab (adapted from cgro00/desk-robot V2's launcher, MIT).
+"""The brain's output, timestamped: on screen, in the live view's Log tab, and in a file a day (adapted from
+cgro00/desk-robot V2's launcher, MIT).
 
-install() tees everything printed (stdout and stderr) into a ring of the last LINES lines, numbered, so the page can
-ask for what's new since the last line it has. It's kept in memory only, never written to disk; the terminal (or
-`docker logs`) still gets every word as before.
+install() tees everything printed (stdout and stderr): each line starts with the time it began (HH:MM:SS) on the
+terminal (or `docker logs`) as before, goes into a ring of the last LINES lines, numbered, so the page can ask for
+what's new since the last line it has, and is appended to server/data/logs/brain-YYYY-MM-DD.log, the last
+config.LOG_DAYS days kept, so a night can be looked back on after the brain has restarted.
 """
 
 from __future__ import annotations
 
 import collections
+import os
 import sys
 import threading
+import time
 
 LINES = 3000
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "logs")
 
 _lock = threading.Lock()
 _lines: collections.deque[tuple[int, str]] = collections.deque(maxlen=LINES)
 _seq = 0
+_dir: str | None = None  # install() sets it: where the day files go (None: no files, as in the tests)
+_days = 14
+_file = None
+_file_day = ""
+
+
+def stamp(at: float | None = None) -> str:
+    return time.strftime("%H:%M:%S", time.localtime(at))
 
 
 def add(text: str) -> None:
+    """Whole lines, already stamped, into the ring and today's file."""
     global _seq
     with _lock:
         for line in text.splitlines() or [""]:
             _seq += 1
             _lines.append((_seq, line.rstrip()))
+            _to_file(line.rstrip())
+
+
+def _to_file(line: str) -> None:
+    """Append a line to today's file (under _lock). A file that can't be written is given up on quietly: printing
+    the error would only come back here."""
+    global _file, _file_day, _dir
+    if _dir is None:
+        return
+    day = time.strftime("%Y-%m-%d")
+    try:
+        if day != _file_day:
+            if _file is not None:
+                _file.close()
+            os.makedirs(_dir, exist_ok=True)
+            _file = open(os.path.join(_dir, f"brain-{day}.log"), "a", encoding="utf-8", errors="replace")
+            _file_day = day
+            for old in sorted(f for f in os.listdir(_dir) if f.startswith("brain-") and f.endswith(".log"))[:-_days]:
+                os.remove(os.path.join(_dir, old))
+            _file.write(f"{stamp()} ---- {day} ----\n")
+        _file.write(line + "\n")
+        _file.flush()
+    except OSError:
+        _dir = None
 
 
 def since(after: int) -> tuple[int, list[str]]:
@@ -35,7 +73,8 @@ def since(after: int) -> tuple[int, list[str]]:
 
 
 class _Tee:
-    """A stream that also keeps whole lines in the log."""
+    """A stream that stamps each line with the time it began and also keeps whole lines in the log. Text without
+    a newline yet still goes to the screen at once."""
 
     def __init__(self, stream) -> None:
         self._stream = stream
@@ -43,13 +82,20 @@ class _Tee:
         self._plock = threading.Lock()
 
     def write(self, s: str) -> int:
-        n = self._stream.write(s)
         with self._plock:
-            self._part += s
-            if "\n" in self._part:
-                done, self._part = self._part.rsplit("\n", 1)
-                add(done)
-        return n
+            out = []
+            for piece in s.splitlines(keepends=True):
+                if not self._part:
+                    self._part = stamp() + " "
+                    out.append(self._part)
+                out.append(piece)
+                if piece.endswith("\n"):
+                    add(self._part + piece[:-1])
+                    self._part = ""
+                else:
+                    self._part += piece
+            self._stream.write("".join(out))
+        return len(s)
 
     def flush(self) -> None:
         self._stream.flush()
@@ -58,7 +104,9 @@ class _Tee:
         return getattr(self._stream, name)
 
 
-def install() -> None:
+def install(log_dir: str | None = LOG_DIR, days: int = 14) -> None:
+    global _dir, _days
+    _dir, _days = log_dir, max(1, days)
     if not isinstance(sys.stdout, _Tee):
         sys.stdout = _Tee(sys.stdout)
     if not isinstance(sys.stderr, _Tee):

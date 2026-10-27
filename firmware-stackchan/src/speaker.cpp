@@ -3,6 +3,8 @@
 #include <M5Unified.h>
 #include <freertos/idf_additions.h>
 
+#include "config.h"
+#include "duplex.h"
 #include "mic.h"
 
 static const int SAMPLE_RATE = 16000;
@@ -16,8 +18,9 @@ static const size_t CHUNK_SAMPLES = 512;       // 32 ms per playRaw()
 static const int NUM_CHUNKS = 3;
 static const int CHANNEL = 0;
 
-void Speaker::begin(Mic* mic, float volume, DoneHandler onDone) {
+void Speaker::begin(Mic* mic, float volume, DoneHandler onDone, Duplex* duplex) {
   mic_ = mic;
+  duplex_ = duplex;
   volume_ = constrain(volume, 0.0f, 1.0f);
   onDone_ = std::move(onDone);
 
@@ -37,6 +40,18 @@ void Speaker::begin(Mic* mic, float volume, DoneHandler onDone) {
 void Speaker::setVolume(float v) {
   volume_ = constrain(v, 0.0f, 1.0f);
   if (M5.Speaker.isRunning()) M5.Speaker.setVolume(static_cast<uint8_t>(volume_ * 255));
+}
+
+float Speaker::level() const {
+  if (!speaking_) return 0.0f;
+  // In duplex the queue runs ~1/3 s ahead of the sound: take the level of what's coming out now, without the volume.
+  if (duplex_ != nullptr && duplex_->running()) return duplex_->playingLevel() / max(duplexGain(), 0.001f);
+  return level_;
+}
+
+float Speaker::duplexGain() const {
+  // M5Unified's loudness for the same volume (its master volume squared, 0.49 at full), capped.
+  return min(0.49f * volume_ * volume_, DUPLEX_MAX_GAIN);
 }
 
 void Speaker::beginSpeech(size_t expectedBytes) {
@@ -104,7 +119,8 @@ void Speaker::task() {
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
-    if (!haveBus) {
+    bool duplex = duplex_ != nullptr && duplex_->running();
+    if (!haveBus && !duplex) {
       // Take the I2S bus from the mic while we pre-buffer.
       if (mic_ != nullptr && !mic_->release()) {
         Serial.println(F("speaker: mic didn't let go of the bus"));
@@ -114,7 +130,8 @@ void Speaker::task() {
       haveBus = true;
     }
     if (stopped_) {  // stop(): drop what's queued and finish as if the line had ended
-      M5.Speaker.stop(CHANNEL);
+      if (duplex) duplex_->flush();
+      else M5.Speaker.stop(CHANNEL);
       portENTER_CRITICAL(&lock_);
       tail_ = head_;
       portEXIT_CRITICAL(&lock_);
@@ -136,10 +153,15 @@ void Speaker::task() {
     if (avail < 2) {
       if (ended_) {
         // Done: let the queue play out, then give the bus back to the mic.
-        while (M5.Speaker.isPlaying()) vTaskDelay(pdMS_TO_TICKS(5));
-        M5.Speaker.end();
-        haveBus = false;
-        if (mic_ != nullptr) mic_->reclaim();
+        if (duplex) {
+          while (duplex_->pending() > 0) vTaskDelay(pdMS_TO_TICKS(5));
+          if (!stopped_) vTaskDelay(pdMS_TO_TICKS(Duplex::LATENCY_MS));  // the DMA's last 90 ms
+        } else {
+          while (M5.Speaker.isPlaying()) vTaskDelay(pdMS_TO_TICKS(5));
+          M5.Speaker.end();
+          haveBus = false;
+          if (mic_ != nullptr) mic_->reclaim();
+        }
         speaking_ = false;
         level_ = 0;
         // The next line's head start: 100 ms more after a line that ran dry,
@@ -168,7 +190,14 @@ void Speaker::task() {
       sumSq += f * f;
     }
     if (n > 0) level_ = 0.6f * level_ + 0.4f * sqrtf(sumSq / n);
-    // With an explicit channel this waits for a free queue slot.
-    M5.Speaker.playRaw(buf, n, SAMPLE_RATE, false, 1, CHANNEL);
+    if (duplex) {
+      // Scaled here (M5Unified did it in its mixer), then queued for the bus; waits while the queue is full.
+      float g = duplexGain();
+      for (size_t i = 0; i < n; ++i) buf[i] = static_cast<int16_t>(buf[i] * g);
+      for (size_t sent = 0; sent < n && !stopped_;) sent += duplex_->play(buf + sent, n - sent, 50);
+    } else {
+      // With an explicit channel this waits for a free queue slot.
+      M5.Speaker.playRaw(buf, n, SAMPLE_RATE, false, 1, CHANNEL);
+    }
   }
 }

@@ -62,6 +62,9 @@ SCHEMA: dict[str, dict[str, tuple]] = {
         "VAD_THRESHOLD":    ("VAD_THRESHOLD", "float", (0.1, 0.95)),
         "TURN_THRESHOLD":   ("TURN_THRESHOLD", "float", (0.1, 0.95)),
         "TURN_MAX_SILENCE": ("TURN_MAX_SILENCE", "float", (0.5, 6.0)),
+        "echo_cancel":      ("ECHO_CANCEL", "bool", None),   # hear while it talks (duplex firmware)
+        "barge_in":         ("BARGE_IN", "bool", None),      # talking over it stops it
+        "ECHO_NEAR_DB":     ("ECHO_NEAR_DB", "float", (0.0, 30.0)),
     },
     "speaker": {
         "TTS_LEVEL":        ("TTS_LEVEL", "float", (0.08, 0.40)),
