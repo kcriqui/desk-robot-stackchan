@@ -158,7 +158,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     _greeting += 1
     why = ""  # why the first message isn't a usable hello (never shows the token)
     try:
-        first = await asyncio.wait_for(websocket.recv(), timeout=2)
+        first = await asyncio.wait_for(websocket.recv(), timeout=5)  # a robot with a slow loop needs more than 2 s
         if isinstance(first, str) and len(first) > 4096:  # the robot's hello is ~150 bytes
             hello, why = {}, f"first message too big for a hello ({len(first)} bytes)"
         elif isinstance(first, str):
@@ -167,7 +167,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
             hello = {}
             why = f"first message was binary ({len(first)} bytes, type 0x{first[:1].hex() or '--'})"
     except asyncio.TimeoutError:
-        hello, why = {}, "no hello within 2 s"
+        hello, why = {}, "no hello within 5 s"
     except json.JSONDecodeError:
         hello, why = {}, "first message wasn't JSON"
     except websockets.ConnectionClosed:
@@ -214,7 +214,9 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         robot_fw = tuple(int(x) for x in str(hello.get("fw", "0")).split(".")[:4])  # 0.6.9.1: four parts
     except ValueError:
         robot_fw = (0, 0, 0)
-    print(f"robot connected! (fw {hello.get('fw', '?')}, {peer})")
+    up, boot = hello.get("up_s"), hello.get("boot")
+    started = (f", started {up} s ago by {str(boot)[:20]}" if isinstance(up, int) and up < 120 and boot else "")
+    print(f"robot connected! (fw {hello.get('fw', '?')}, {peer}{started})")
     global robot_wake_word, robot_asleep, powering_off, powered_off, robot_deep_sleep
     powering_off = False  # it powered back on (or never went)
     powered_off = None
@@ -294,6 +296,9 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
             if event.get("type") == "touch":  # the head's touch strip (firmware 0.6.9.33+)
                 for g in touches.feed(event, time.time()):
                     asyncio.create_task(on_touch(g, event))
+                continue
+            if event.get("type") == "note":  # a line for the log (firmware 0.6.10.5+)
+                print(f"(robot: {str(event.get('text'))[:1000]})")
                 continue
             if event.get("type") == "hush":  # a hand over its sensor stopped it talking (firmware 0.6.9.2+)
                 on_robot_hush()
@@ -602,6 +607,10 @@ def situation() -> str:
     if b is not None and b.low() and now - b.at < 60:
         state += (f" Your battery is LOW (about {b.percent}%, roughly {b.minutes_left()} minutes left): "
                   "mention it and ask to be plugged in.")
+    elif b is not None and now - b.at < 60:
+        # Always the level: told it only when low, it quoted an old reading from the conversation (90% at 53%).
+        state += (f" Battery: about {b.percent}%, running on it." if b.on_battery
+                  else " Battery: on USB power" + (", charging." if b.charging else "."))
     if eyes.temperature is not None and eyes.temperature >= config.TEMP_WARN_C:
         state += f" Your chip is hot ({eyes.temperature:.0f} C)."
     return state

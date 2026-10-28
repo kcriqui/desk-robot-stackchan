@@ -26,12 +26,12 @@ class BatteryWatchTests(unittest.TestCase):
 
     def test_warns_more_urgently_as_it_falls(self):
         w = alerts.BatteryWatch()
-        self.assertIsNone(self.feed(w, 3.90, 0))                      # ~70%: fine
-        self.assertEqual(self.feed(w, 3.67, 100), "battery_low")      # ~18%
-        self.assertIsNone(self.feed(w, 3.67, 200))                    # once only at this level
-        self.assertEqual(self.feed(w, 3.58, 300), "battery_very_low")  # ~9%
-        self.assertIsNone(self.feed(w, 3.58, 400))                    # not again within 10 min
-        self.assertEqual(self.feed(w, 3.58, 400 + 11 * 60), "battery_very_low")
+        self.assertIsNone(self.feed(w, 3.87, 0))                      # ~70%: fine
+        self.assertEqual(self.feed(w, 3.60, 100), "battery_low")      # ~17%
+        self.assertIsNone(self.feed(w, 3.60, 200))                    # once only at this level
+        self.assertEqual(self.feed(w, 3.54, 300), "battery_very_low")  # ~9%
+        self.assertIsNone(self.feed(w, 3.54, 400))                    # not again within 10 min
+        self.assertEqual(self.feed(w, 3.54, 400 + 11 * 60), "battery_very_low")
         self.assertEqual(self.feed(w, 3.45, 2000), "battery_critical")  # ~4%
         self.assertEqual(self.feed(w, 3.45, 2000 + 3 * 60), "battery_critical")  # every 2 min
 
@@ -42,14 +42,14 @@ class BatteryWatchTests(unittest.TestCase):
 
     def test_plugging_in_after_a_warning_says_thanks(self):
         w = alerts.BatteryWatch()
-        self.assertEqual(self.feed(w, 3.67, 0), "battery_low")
+        self.assertEqual(self.feed(w, 3.60, 0), "battery_low")
         self.assertEqual(w.check(Reading(3.9, -400, 100), 100), "battery_saved")
         self.assertIsNone(w.check(Reading(3.9, -400, 110), 110))  # once
         self.assertIsNone(alerts.BatteryWatch().check(Reading(3.9, -400, 0), 0))  # no warning, no thanks
 
     def test_a_reading_is_looked_at_once(self):
         w = alerts.BatteryWatch()
-        r = on_battery(3.67, 5)
+        r = on_battery(3.60, 5)
         for _ in range(5):
             w.check(r, 5)
         self.assertEqual(len(w.recent), 1)
@@ -100,15 +100,15 @@ class PowerOffWatchTests(unittest.TestCase):
 
     def test_a_timer_keeps_him_on_unless_the_battery_is_low(self):
         w = alerts.PowerOffWatch()
-        key, _ = self.run_until(w, 3.90, True, True, 0, self.IDLE + 600)   # ~70%
+        key, _ = self.run_until(w, 3.87, True, True, 0, self.IDLE + 600)   # ~70%
         self.assertIsNone(key)
         w = alerts.PowerOffWatch()
-        key, _ = self.run_until(w, 3.65, True, True, 0, self.IDLE + 60)    # ~15%
+        key, _ = self.run_until(w, 3.59, True, True, 0, self.IDLE + 60)    # ~15%
         self.assertEqual(key, "power_off_idle_timers")
 
     def test_nearly_flat_shuts_down_even_awake_with_timers(self):
         w = alerts.PowerOffWatch()
-        key, at = self.run_until(w, 3.49, False, True, 0, 100)
+        key, at = self.run_until(w, 3.40, False, True, 0, 100)
         self.assertEqual((key, at), ("power_off_battery", 20))   # three readings in
         w = alerts.PowerOffWatch()   # one dip (talking) isn't enough
         w.check(on_battery(3.85, 0), False, False, 0)
@@ -126,7 +126,7 @@ class PowerOffWatchTests(unittest.TestCase):
         self.assertLess(half, config.POWER_BANK_OFF_PERCENT)   # the reading used below
         with unittest.mock.patch.object(config, "POWER_BANK", True):
             w = alerts.PowerOffWatch()
-            key, _ = self.run_until(w, 3.90, True, False, 0, self.IDLE + 600)   # ~70%, asleep: no idle power-off
+            key, _ = self.run_until(w, 3.87, True, False, 0, self.IDLE + 600)   # ~70%, asleep: no idle power-off
             self.assertIsNone(key)
             w = alerts.PowerOffWatch()
             for t in range(0, self.IDLE, 10):   # the pack is still going: USB
@@ -137,7 +137,7 @@ class PowerOffWatchTests(unittest.TestCase):
             key, at = self.run_until(w, 3.72, True, True, 610, 700)  # ...then asleep: off, timers or not
             self.assertEqual((key, at), ("power_off_bank", 610))
             w = alerts.PowerOffWatch()
-            key, _ = self.run_until(w, 3.49, False, True, 0, 100)   # nearly flat: off at once, as ever
+            key, _ = self.run_until(w, 3.40, False, True, 0, 100)   # nearly flat: off at once, as ever
             self.assertEqual(key, "power_off_battery")
 
 

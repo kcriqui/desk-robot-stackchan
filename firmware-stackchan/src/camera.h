@@ -19,6 +19,9 @@ class Camera {
   using PoseSource = std::function<void(float& pan, float& tilt)>;
 
   bool begin();  // false if the camera didn't come up
+  // Tears the camera's driver down and sets it up again (after the internal bus was lost and recovered, the
+  // sensor no longer answers its own driver); false if it didn't come back.
+  bool restart();
   bool ok() const { return ok_; }
   void setPoseSource(PoseSource src) { poseSource_ = std::move(src); }
 
@@ -44,8 +47,13 @@ class Camera {
  private:
   static void taskEntry(void* self);
   void task();
+  bool initSensor();
 
   bool ok_ = false;
+  bool sensorUp_ = false;          // esp_camera_init succeeded and hasn't been torn down
+  bool taskStarted_ = false;
+  volatile bool paused_ = false;   // restart() in progress: the task keeps its hands off the driver
+  volatile bool busy_ = false;     // the task is inside the driver (grabbing a frame)
   volatile bool streaming_ = false;
   volatile uint32_t intervalMs_ = 125;
   uint8_t* latest_ = nullptr;      // PSRAM

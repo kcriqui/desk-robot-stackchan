@@ -408,7 +408,7 @@ class RobotBrain:
         Yields sentences as they complete. The turn's messages go in `turn`,
         not the history (see reply())."""
         nudged = False
-        limit = config.REPLY_MAX_SENTENCES
+        limit = personality.max_sentences()
         tools = [t for t in TOOLS if t["function"]["name"] in self.actions]
         for _ in range(5):
             if cancelled.is_set():

@@ -86,6 +86,8 @@ struct FacePack {
   bool outline = false;     // eyes drawn as outlines instead of solid
   bool glint = true;        // a pupil in each eye (dark, with a highlight) that looks around on its own
   uint8_t mouth = 0;        // 0 = only while talking, 1 = always (a resting smile), 2 = never
+  float mouthW = 14;        // the resting mouth's width, face pixels (StackChan's own face: a wide bar)
+  float mouthTilt = 0;      // idle, the resting mouth now and then tilts by up to this many degrees (StackChan's)
   uint32_t color = 0xF4F1EA;  // the eyes' colour for emotions that don't set one
   EmotionLook looks[static_cast<int>(Emotion::COUNT)];
   EyeShape asleep;          // the shut eyes while sleeping
@@ -219,6 +221,8 @@ class Face {
   float mouthLevel_ = 0.0f;
   float mouth_ = 0.0f;          // eased openness 0..1
   float smile_ = 0.0f;          // eased resting-mouth curve
+  float tilt_ = 0.0f;           // eased resting-mouth tilt, degrees (pack mouthTilt), and where it's heading
+  float tiltTarget_ = 0.0f;
 
   bool idle_ = true;
   bool listening_ = false;

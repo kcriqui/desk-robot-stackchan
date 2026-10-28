@@ -179,6 +179,16 @@ PIPER_VOICES = {
             ".onnx.json": "6425dcb878684043b77d772b173ae006d86a583b110303edda48b8438ecee5ee",
         },
     },
+    # 904 audiobook readers. The speakers listed are the closest to the original StackChan's voice (captured from
+    # its factory firmware and ranked by speaker-embedding similarity, .devtools/voice_search.py, 2026-10-27).
+    "en_US-libritts_r-medium": {
+        "pitch": 0.0, "speed": 1.0, "noise": None, "noise_w": None,
+        "speakers": ["3446", "8605", "3972", "5740", "4839"],
+        "sha256": {
+            ".onnx": "10bb85e071d616fcf4071f369f1799d0491492ab3c5d552ec19fb548fac13195",
+            ".onnx.json": "b471dc60d2d8335e819c393d196d6fbf792817f40051257b269878505bc9afb3",
+        },
+    },
     "en_US-hfc_male-medium": {  # plan B: its own defaults (it's set 25% faster than most)
         "pitch": 0.0, "speed": 1.0, "noise": None, "noise_w": None,
         "sha256": {
@@ -409,7 +419,9 @@ TRACKING = False
 TRACK_ON_PHRASES = ["track me", "follow me", "watch me", "keep your eyes on me", "look at me"]
 TRACK_OFF_PHRASES = ["stop tracking", "stop following", "stop watching", "stop looking at me"]
 # The head's touch strip (touch.py): how the robot's raw touches become gestures.
-TOUCH_BONK_LEVEL = 3          # a tap this hard (the sensor's 1-3) is a bonk, not a pat
+# A tap at this level (the sensor's 1-3) is a bonk, not a pat; 0 = no bonks. Off since 2026-10-28: the strip senses
+# how much finger touches it, not how hard, so a gentle full-finger tap reads 3 like a bonk.
+TOUCH_BONK_LEVEL = 0
 TOUCH_DOUBLE_SECONDS = 0.45   # a second tap within this is a double tap
 TOUCH_PET_SETTLE_SECONDS = 0.9  # strokes end when none has come for this long...
 TOUCH_SCRATCH_STROKES = 3     # ...and this many or more is a scratch, fewer is petting

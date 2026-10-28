@@ -3,9 +3,12 @@ the body's INA226. The robot sends a reading every ~10 s (docs/protocol.md):
 voltage, and current in mA, positive while discharging, negative while
 charging.
 
-Charge is estimated from the voltage on a typical Li-ion curve, so it's
-approximate, and reads a little low while the robot is busy (the voltage
-sags under load) and high while charging.
+Charge is estimated from the voltage on this battery's own curve, measured
+under the robot's load (2026-10-28: run to empty from 4.02 V to 3.02 V at
+200-290 mA, 574 mAh counted from the current; .devtools/battery_chart.py).
+It reads a little high while charging. The generic resting-cell curve it
+replaces said 19% where half the charge was left: the cell holds a long flat
+stretch at 3.6-3.7 V, then falls from 3.45 V to 3.0 V in about 10 minutes.
 """
 
 from __future__ import annotations
@@ -13,12 +16,12 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-CAPACITY_MAH = 550
+CAPACITY_MAH = 650  # rated 550; ~574 mAh measured from 4.02 V, ~650 from full
 LOW_PERCENT = 15  # below this (on battery), he's told so with every question
 
-# Resting voltage → charge, for one Li-ion cell.
-_CURVE = [(3.30, 0), (3.50, 5), (3.61, 10), (3.69, 20), (3.74, 30), (3.77, 40),
-          (3.80, 50), (3.84, 60), (3.90, 70), (3.96, 80), (4.05, 90), (4.15, 100)]
+# Voltage under the robot's load → charge left, measured (see above). 0% is where the robot powers itself off.
+_CURVE = [(3.30, 0), (3.45, 4), (3.55, 10), (3.60, 17), (3.65, 30), (3.69, 42), (3.73, 50), (3.76, 60),
+          (3.87, 70), (3.95, 80), (4.02, 88), (4.12, 100)]
 _IDLE_MA = 20  # within ±this, the battery isn't really in use: USB powers the robot
 
 

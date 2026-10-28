@@ -91,13 +91,13 @@ constexpr uint32_t DEEP_SLEEP_AFTER_MS = 5UL * 60 * 1000;
 // The brain decides when to power off (long idle, reminders, a nearly flat
 // battery) and says goodbye first. These are the robot's own fallbacks for
 // when it can't: on battery with no brain link for this long, or the battery
-// below POWER_OFF_VOLTS (about 5%, server/brain/battery.py's curve) for
+// below POWER_OFF_VOLTS (0% on server/brain/battery.py's measured curve) for
 // three readings with no brain, or for two minutes with one.
 constexpr uint32_t ORPHAN_POWER_OFF_MS = 30UL * 60 * 1000;
 // With no brain link for this long it falls asleep by itself (only the brain puts it to sleep otherwise), so deep
 // sleep follows DEEP_SLEEP_AFTER_MS later, on USB too with the power bank setting. The brain wakes it on reconnect.
 constexpr uint32_t ORPHAN_SLEEP_MS = 3UL * 60 * 1000;
-constexpr float POWER_OFF_VOLTS = 3.50f;
+constexpr float POWER_OFF_VOLTS = 3.30f;  // run to empty 2026-10-28: ~2% is left below it, and it falls fast
 // Drawing more than this from the battery means he's on battery, not USB
 // (the same threshold as the brain's).
 constexpr float ON_BATTERY_MA = 20.0f;

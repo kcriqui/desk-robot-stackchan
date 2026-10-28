@@ -1,0 +1,157 @@
+{
+  "name": "StackChan",
+  "author": "desk-robot",
+  "description": "The original StackChan's face: small white dot eyes set wide and a flat bar of a mouth that never curves, on black; half-moon eyes when happy.",
+  "gap": 48,
+  "y": -6,
+  "cyclops": false,
+  "outline": false,
+  "glint": false,
+  "mouth": "always",
+  "mouth_w": 36,
+  "mouth_tilt": 3,
+  "color": "#FFFFFF",
+  "asleep": {
+    "w": 10,
+    "h": 2,
+    "rt": 1,
+    "rb": 1
+  },
+  "emotions": {
+    "neutral": {
+      "w": 8,
+      "h": 8,
+      "rt": 4,
+      "rb": 4
+    },
+    "happy": {
+      "w": 8,
+      "h": 8,
+      "rt": 4,
+      "rb": 4,
+      "cheek": 4
+    },
+    "sad": {
+      "w": 8,
+      "h": 8,
+      "rt": 4,
+      "rb": 4,
+      "lid": 3,
+      "st": -3
+    },
+    "angry": {
+      "w": 8,
+      "h": 8,
+      "rt": 4,
+      "rb": 4,
+      "lid": 3,
+      "st": 3,
+      "fx": [
+        "steam"
+      ]
+    },
+    "surprised": {
+      "w": 10,
+      "h": 10,
+      "rt": 5,
+      "rb": 5,
+      "fx": [
+        "pop"
+      ],
+      "pop": 0.3
+    },
+    "sleepy": {
+      "w": 8,
+      "h": 8,
+      "rt": 4,
+      "rb": 4,
+      "lid": 6
+    },
+    "thinking": {
+      "w": 8,
+      "h": 8,
+      "rt": 4,
+      "rb": 4,
+      "lid": 2,
+      "fx": [
+        "dots"
+      ],
+      "gaze": [
+        4,
+        -3
+      ]
+    },
+    "curious": {
+      "w": 8,
+      "h": 8,
+      "rt": 4,
+      "rb": 4,
+      "right": {
+        "w": 10,
+        "h": 10,
+        "rt": 5,
+        "rb": 5,
+        "dy": -1
+      },
+      "gaze": [
+        -3,
+        -2
+      ]
+    },
+    "skeptical": {
+      "w": 8,
+      "h": 8,
+      "rt": 4,
+      "rb": 4,
+      "lid": 2,
+      "right": {
+        "w": 8,
+        "h": 8,
+        "rt": 4,
+        "rb": 4,
+        "lid": 4
+      }
+    },
+    "excited": {
+      "w": 10,
+      "h": 10,
+      "rt": 5,
+      "rb": 5,
+      "cheek": 4,
+      "fx": [
+        "sparkle",
+        "bounce"
+      ],
+      "pop": 0.2
+    },
+    "love": {
+      "w": 8,
+      "h": 8,
+      "rt": 4,
+      "rb": 4,
+      "cheek": 4,
+      "fx": [
+        "hearts",
+        "blush"
+      ]
+    },
+    "confused": {
+      "w": 8,
+      "h": 8,
+      "rt": 4,
+      "rb": 4,
+      "lid": 2,
+      "right": {
+        "w": 8,
+        "h": 8,
+        "rt": 4,
+        "rb": 4,
+        "dy": 1
+      },
+      "fx": [
+        "question",
+        "wobble"
+      ]
+    }
+  }
+}

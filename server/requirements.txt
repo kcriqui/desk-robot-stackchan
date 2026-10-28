@@ -9,4 +9,5 @@ sherpa-onnx==2.0.0      # wake words: open-vocabulary keyword spotting (brain/kw
 sentencepiece==0.2.2    # ...turning wake phrases into the keyword model's tokens
 sounddevice==0.5.6     # Mac microphone (fallback when the robot is offline)
 numpy==2.5.2
+tzdata==2026.5          # time-zone rules for the clock screen on Windows (it has none of its own)
 opencv-python-headless==5.0.0.93  # face tracking (YuNet model in models/)

@@ -34,9 +34,11 @@ class Link {
   void update(uint32_t nowMs);
 
   bool connected() const { return connected_; }
+  static const char* bootReason();  // why the chip last started, for the hello
 
   // Robot → server. Text is sent as-is (should be JSON).
   void sendJson(const String& json);
+  void sendNote(const char* text);  // a line for the brain's log
   void sendState(float panDeg, const char* emotion);
   // Binary frame: one type byte (0x01 = mic audio, 0x02 = JPEG) + payload.
   void sendBinary(uint8_t type, const uint8_t* data, size_t len);

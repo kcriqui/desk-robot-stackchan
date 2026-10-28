@@ -56,6 +56,29 @@ class LogbookTests(unittest.TestCase):
             with open(os.path.join(d, "brain-2026-10-27.log"), encoding="utf-8") as f:
                 self.assertEqual(f.read().splitlines()[-1], "12:34:56 touch: pat")
 
+    def test_a_failed_write_reopens_the_file_later(self):
+        class Stale:  # an open file on a share that went away while the PC slept
+            def write(self, _):
+                raise OSError("stale handle")
+
+            def close(self):
+                raise OSError("stale handle")
+
+        with tempfile.TemporaryDirectory() as d:
+            clock = [100.0]
+            with patch.object(logbook, "_dir", d), patch.object(logbook, "_retry_at", 0.0), \
+                    patch.object(logbook, "_file", Stale()), patch.object(logbook, "_file_day", "2026-10-28"), \
+                    patch.object(logbook.time, "strftime", lambda f, *a: "2026-10-28"), \
+                    patch.object(logbook.time, "monotonic", lambda: clock[0]):
+                logbook.add("lost")            # the write fails: the stale file is dropped
+                logbook.add("too soon")        # still waiting to retry
+                clock[0] += logbook.RETRY_S
+                logbook.add("back")            # a fresh file
+                logbook._file.close()
+                logbook._file = None
+            with open(os.path.join(d, "brain-2026-10-28.log"), encoding="utf-8") as f:
+                self.assertEqual(f.read().splitlines()[-1], "back")
+
 
 if __name__ == "__main__":
     unittest.main()

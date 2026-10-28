@@ -19,6 +19,7 @@ newest. A tiny HTTP server (standard library, its own thread) serves:
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -237,7 +238,15 @@ class Eyes:
                 except (BrokenPipeError, ConnectionResetError):
                     pass
 
-        server = ThreadingHTTPServer((bind, port), Handler)
+        class Server(ThreadingHTTPServer):
+            def handle_error(self, request, client_address) -> None:
+                # A page that hung up before its reply (a closed tab, a poll that timed out) isn't worth a
+                # traceback in the log; anything else still gets one.
+                if isinstance(sys.exc_info()[1], (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+                    return
+                super().handle_error(request, client_address)
+
+        server = Server((bind, port), Handler)
         server.daemon_threads = True
         threading.Thread(target=server.serve_forever, daemon=True).start()
 

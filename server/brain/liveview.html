@@ -340,6 +340,9 @@
               <div class="set"><label class="k" for="c-wake">Wake words</label>
                 <input type="text" id="c-wake" maxlength="200" autocomplete="off" spellcheck="false" placeholder="hey juniper, captain juniper">
                 <p class="hint">Comma-separated, up to 6. Saying one wakes the robot as them. Write them as they sound: \u201chey glad us\u201d finds GLaDOS. Empty = \u201chey\u201d and the name.</p></div>
+              <div class="set"><label class="k" for="c-most">Longest reply</label>
+                <input type="number" id="c-most" min="0" max="12" step="1" placeholder="3">
+                <p class="hint">Sentences; past it the rest isn't spoken. Empty or 0 = the usual (3). StackChan tells longer stories.</p></div>
               <div class="set"><label class="k" for="c-pron">Pronouns</label>
                 <select id="c-pron"><option value="he">he / him</option><option value="she">she / her</option><option value="they">they / them</option><option value="it">it / its</option></select>
                 <p class="hint">Told to the language model, and used for the wording on this page.</p></div>
@@ -932,6 +935,7 @@
     cstate.saved = JSON.parse(JSON.stringify(ch));
     $("c-name").value = ch.name; $("c-desc").value = ch.description || ""; $("c-pron").value = ch.pronouns || "they";
     $("c-wake").value = (ch.wake_words || []).join(", ");
+    $("c-most").value = ch.max_sentences || "";
     $("c-identity").value = ch.identity || ""; $("c-style").value = ch.style || ""; $("c-emotions").value = ch.emotions || "";
     $("c-examples").value = (ch.examples || []).join("\n");
     for (const i of document.querySelectorAll("[id^=c-l-]")) { const k = i.id.slice(4); i.value = (k === "search" || k === "dance" ? ch.leads?.[k] : ch.lines?.[k]) || ""; }
@@ -955,7 +959,8 @@
     return { name: $("c-name").value.trim(), pronouns: $("c-pron").value, description: $("c-desc").value.trim(), identity: $("c-identity").value.trim(),
              style: $("c-style").value.trim(), emotions: $("c-emotions").value.trim(),
              examples: $("c-examples").value.split("\n").map(l => l.trim()).filter(Boolean), leads, lines, voice, face: $("c-face").value,
-             wake_words: $("c-wake").value.split(",").map(w => w.trim()).filter(Boolean) };
+             wake_words: $("c-wake").value.split(",").map(w => w.trim()).filter(Boolean),
+             max_sentences: Math.max(0, Math.min(12, parseInt($("c-most").value, 10) || 0)) };
   }
   function markCharDirty(on) {
     cstate.dirty = on;

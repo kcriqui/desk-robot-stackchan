@@ -295,6 +295,9 @@ void printScreen() {
 // sleeps deeper on USB, to make the pack last.
 float batteryVolts = 0, batteryMa = 0;  // the body's INA226, read every 10 s
 uint32_t nextBatteryMs = 0;
+static const int I2C_SDA = 12, I2C_SCL = 11;  // the internal bus (see i2cRecover)
+bool i2cRecover(const char* why);
+String i2cReport();
 uint32_t asleepSinceMs = 0;   // when his eyes shut; 0 while awake
 uint32_t orphanSinceMs = 0;   // when the brain link went away; 0 while connected
 uint8_t lowVoltReadings = 0;  // in a row, at or below POWER_OFF_VOLTS
@@ -302,14 +305,15 @@ bool deepSleep = false;
 
 bool onBattery() { return batteryMa > ON_BATTERY_MA; }
 
-uint32_t servoOffAtMs = 0;  // deep sleep: when to cut the servos' power (the head is going down first); 0 = not pending
+// Deep sleep lets the servos go limp but keeps their power: cutting it saved ~5 mA each (the datasheet's idle
+// current) and the head twitched every time it came back, a guard or not (2026-10-28).
+uint32_t servoOffAtMs = 0;  // deep sleep: when to let the servos go limp (the head is going down first); 0 = not pending
 static const uint32_t SERVO_OFF_DELAY_MS = 1500;
-static const uint32_t SERVO_WAKE_MS = 600;  // power back on: the servos answer on the bus after this
 
 void checkServoOff(uint32_t now) {
   if (servoOffAtMs && deepSleep && static_cast<int32_t>(now - servoOffAtMs) >= 0) {
     servoOffAtMs = 0;
-    M5StackChan.setServoPowerEnabled(false);
+    M5StackChan.Motion.setTorqueEnabled(false);
   }
 }
 
@@ -320,8 +324,8 @@ void setDeepSleep(bool on) {
     M5.Display.setBrightness(0);
     M5.Display.sleep();
     WiFi.setSleep(true);  // modem sleep: asleep, he sends nothing but a reading every 10 s
-    // Head to the middle and down as far as it goes before the servos lose power (it would droop anyway);
-    // checkServoOff() cuts it once the move is done.
+    // Head to the middle and down as far as it goes before the servos go limp (it would droop anyway);
+    // checkServoOff() lets go once the move is done.
     panNeck.setRaw(0);
     tiltNeck.setRaw(TILT_MIN_DEG);
     panNeck.update(millis());
@@ -329,9 +333,8 @@ void setDeepSleep(bool on) {
     servoOffAtMs = (millis() + SERVO_OFF_DELAY_MS) | 1;
   } else {
     servoOffAtMs = 0;
-    M5StackChan.setServoPowerEnabled(true);
-    panNeck.resync(millis(), SERVO_WAKE_MS);  // the head may have drooped while they were off
-    tiltNeck.resync(millis(), SERVO_WAKE_MS);
+    panNeck.resync(millis(), 0);  // the head may have drooped while they were limp; the first move takes torque again
+    tiltNeck.resync(millis(), 0);
     WiFi.setSleep(false);
     M5.Display.wakeup();
     M5.Display.setBrightness(face.asleep() ? max(awakeBrightness / 4, 8) : awakeBrightness);
@@ -353,8 +356,8 @@ void powerOff(const String& why) {
   // during the goodbye and the screen below.
   panNeck.setTarget(0);
   tiltNeck.setTarget(TILT_MIN_DEG);
-  for (uint32_t waited = 0; waited <= SERVO_WAKE_MS + SEND_SETTLE_MS; waited += SEND_SETTLE_MS) {
-    delay(SEND_SETTLE_MS);  // out of deep sleep, the servos need a moment before they take a move
+  for (uint32_t waited = 0; waited <= 600 + SEND_SETTLE_MS; waited += SEND_SETTLE_MS) {
+    delay(SEND_SETTLE_MS);  // the moves go out a few at a time
     panNeck.update(millis());
     tiltNeck.update(millis());
   }
@@ -422,6 +425,7 @@ void printHelp() {
   Serial.println(F("  battery      battery voltage and current"));
   Serial.println(F("  power        battery, deep sleep and power-off state"));
   Serial.println(F("  deep now     asleep on battery: sleep deeper now, not after 5 min"));
+  Serial.println(F("  i2c [fix|camera|report|scan|rd <addr> <reg> [n]]  the internal bus: its lines, freeing it, who answers, a read (hex)"));
   Serial.println(F("  poweroff     power off now (the power button turns him back on)"));
   Serial.println(F("  clock [tz [12|24]]  the clock screen's time zone (POSIX rule), or its status"));
   Serial.println(F("  weather <temp> <hi> <lo> <code> <day 0|1> <F|C> <words>  the clock screen's weather"));
@@ -641,6 +645,34 @@ void handleCommand(String line) {
     light.printStatus();
   } else if (cmd == "weather") {
     if (!clockScreen.setWeather(arg)) Serial.println(F("usage: weather <temp> <hi> <lo> <code> <day 0|1> <F|C> <words>"));
+  } else if (cmd == "i2c") {
+    Serial.printf("i2c: SDA %d, SCL %d (1 = free)\n", digitalRead(I2C_SDA), digitalRead(I2C_SCL));
+    if (arg == "fix") {
+      i2cRecover("asked");
+    } else if (arg == "camera") {
+      camera.restart();
+    } else if (arg == "report") {
+      Serial.printf("i2c: %s\n", i2cReport().c_str());
+    } else if (arg == "scan") {  // every address that answers
+      String found;
+      for (uint8_t a = 0x08; a < 0x78; ++a) {
+        if (M5.In_I2C.start(a, false, 100000) && M5.In_I2C.stop()) found += String(" 0x") + String(a, HEX);
+        else M5.In_I2C.stop();
+      }
+      Serial.printf("i2c: answering:%s\n", found.length() ? found.c_str() : " none");
+    } else if (arg.startsWith("rd ")) {  // i2c rd <addr> <reg> [n], hex: n registers from reg
+      int a = 0, r = 0, n = 1;
+      sscanf(arg.c_str() + 3, "%x %x %d", &a, &r, &n);
+      n = constrain(n, 1, 16);
+      uint8_t buf[16];
+      if (M5.In_I2C.readRegister(a, r, buf, n, 100000)) {
+        String out;
+        for (int i = 0; i < n; ++i) out += String(" ") + String(buf[i], HEX);
+        Serial.printf("i2c: 0x%02x reg 0x%02x:%s\n", a, r, out.c_str());
+      } else {
+        Serial.printf("i2c: 0x%02x didn't answer\n", a);
+      }
+    }
   } else if (cmd == "poweroff") {
     powerOff(arg.isEmpty() ? String("console") : arg);
   } else if (cmd == "demo") {
@@ -687,13 +719,110 @@ uint32_t msSince(uint32_t now, uint32_t then) {
   return static_cast<int32_t>(now - then) > 0 ? now - then : 0;
 }
 
+// The internal I2C bus (G12 SDA, G11 SCL) carries the power chip, the speaker amp, the camera's control, the light
+// sensor and the body's chips (battery monitor, IO expander with the light bars, touch). A chip cut off mid-byte
+// (a restart, a glitch) can hold SDA low for good, and then every one of them stops answering: no voice, no
+// picture, dark light bars, a 0 V battery, and a loop slowed to ~1 s by timeouts (2026-10-28, after falling
+// asleep; a restart doesn't clear it). The cure: clock SCL until the chip lets go, then a STOP.
+bool i2cRecover(const char* why) {
+  bool hadBus = M5.In_I2C.isEnabled();
+  if (hadBus) M5.In_I2C.release();
+  pinMode(I2C_SDA, INPUT_PULLUP);
+  pinMode(I2C_SCL, OUTPUT_OPEN_DRAIN);
+  digitalWrite(I2C_SCL, HIGH);
+  delayMicroseconds(20);
+  bool wasStuck = digitalRead(I2C_SDA) == LOW;
+  int pulses = 0;
+  for (; pulses < 18 && digitalRead(I2C_SDA) == LOW; ++pulses) {
+    digitalWrite(I2C_SCL, LOW);
+    delayMicroseconds(10);
+    digitalWrite(I2C_SCL, HIGH);
+    delayMicroseconds(10);
+  }
+  pinMode(I2C_SDA, OUTPUT_OPEN_DRAIN);  // STOP: SDA rises while SCL is high
+  digitalWrite(I2C_SDA, LOW);
+  delayMicroseconds(10);
+  digitalWrite(I2C_SCL, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(I2C_SDA, HIGH);
+  delayMicroseconds(10);
+  pinMode(I2C_SDA, INPUT_PULLUP);
+  bool freed = digitalRead(I2C_SDA) == HIGH && digitalRead(I2C_SCL) == HIGH;
+  if (hadBus) M5.In_I2C.begin();
+  Serial.printf("i2c: %s: SDA was %s, %d clock pulses, bus %s\n", why, wasStuck ? "stuck low" : "high", pulses,
+                freed ? "free" : "STILL STUCK");
+  return wasStuck;
+}
+
+// The camera, streaming but with no frame for 15 s, gets its driver restarted (every 30 s at most): a boot can
+// leave its driver without the bus it shares with M5Unified ("SCCB_Write Failed", 2026-10-28), and only a restart
+// of the whole robot brought it back.
+uint32_t camSeenCount = 0, camSeenMs = 0, camFixMs = 0;
+
+void checkCamera(uint32_t now) {
+  uint32_t n = camera.framesCaptured();
+  if (!camera.streaming() || n != camSeenCount) {
+    camSeenCount = n;
+    camSeenMs = now;
+    return;
+  }
+  if (msSince(now, camSeenMs) >= 15000 && (camFixMs == 0 || msSince(now, camFixMs) >= 30000)) {
+    camFixMs = now | 1;
+    camSeenMs = now;
+    bool ok = camera.restart();
+#if HAVE_BRAIN
+    brainLink.sendNote(ok ? "camera: no frames for 15 s, restarted its driver: back"
+                          : "camera: no frames for 15 s, restarted its driver: still not answering");
+#endif
+  }
+}
+
 // Every loop: read the battery every 10 s, sleep deeper when it's time, and
 // the robot's own power-off fallbacks (config.h).
+uint8_t deadBusReadings = 0;  // battery readings in a row with the monitor silent (exactly 0 V and 0 mA)
+uint32_t lastBusFixMs = 0;
+
+// Which chips on the internal bus answer, and the power chip's output switches (AXP2101 reg 0x90; 0xbf is normal).
+String i2cReport() {
+  static const struct { uint8_t addr; const char* name; } chips[] = {
+      {0x34, "power"}, {0x58, "expander"}, {0x36, "amp"}, {0x23, "light"}, {0x21, "camera"},
+      {0x41, "battery"}, {0x6F, "body"}, {0x68, "touch"}, {0x51, "clock"}};
+  String out;
+  for (auto& c : chips) {
+    uint8_t v = 0;
+    bool ok = M5.In_I2C.readRegister(c.addr, 0x00, &v, 1, 100000);
+    out += String(c.name) + (ok ? " ok, " : " SILENT, ");
+  }
+  uint8_t rails = 0;
+  out += M5.In_I2C.readRegister(0x34, 0x90, &rails, 1, 100000) ? "rails 0x" + String(rails, HEX) : String("rails ?");
+  out += String(", SDA ") + digitalRead(I2C_SDA) + " SCL " + digitalRead(I2C_SCL);
+  return out;
+}
+
 void updatePower(uint32_t now) {
   if (now >= nextBatteryMs) {
     nextBatteryMs = now + 10000;
     batteryVolts = M5StackChan.getBatteryVoltage();
     batteryMa = M5StackChan.getBatteryCurrent() * 1000.0f;
+    // The monitor reads the battery even on USB, so silence is the bus, not the battery. Three readings (30 s),
+    // then free the bus, at most once a minute.
+    deadBusReadings = (batteryVolts == 0.0f && batteryMa == 0.0f) ? deadBusReadings + 1 : 0;
+    // A minute after starting (the first readings can be 0), and at most once every 5 minutes.
+    if (deadBusReadings >= 3 && now > 60000 && (lastBusFixMs == 0 || msSince(now, lastBusFixMs) >= 300000)) {
+      lastBusFixMs = now | 1;
+      String before = i2cReport();
+      M5.In_I2C.release();  // restart the bus driver (no pin games: those upset the camera's)
+      M5.In_I2C.begin();
+      delay(5);
+      float v = M5StackChan.getBatteryVoltage();
+      String note = "battery monitor silent 30 s. Bus: " + before + ". Driver restarted: battery " + String(v, 2) +
+                    " V, " + i2cReport();
+      note += camera.restart() ? ". Camera restarted." : ". Camera restart FAILED.";
+      Serial.printf("i2c: %s\n", note.c_str());
+#if HAVE_BRAIN
+      brainLink.sendNote(note.c_str());
+#endif
+    }
     lowVoltReadings = (onBattery() && batteryVolts > 1.0f && batteryVolts <= POWER_OFF_VOLTS)
                           ? lowVoltReadings + 1 : 0;
     if (lowVoltReadings >= (brainLink.connected() ? 12 : 3)) {
@@ -701,6 +830,7 @@ void updatePower(uint32_t now) {
     }
   }
   checkServoOff(now);
+  checkCamera(now);
   if (!onBattery() && !screenCfg.powerBank) {
     setDeepSleep(false);  // plugged in: back to normal
   } else if (face.asleep() && asleepSinceMs && msSince(now, asleepSinceMs) >= DEEP_SLEEP_AFTER_MS) {
@@ -775,7 +905,7 @@ void setup() {
   face.setIdle(true);
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.0 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.13 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN

@@ -9,7 +9,7 @@
 
 static const size_t LATEST_CAP = 64 * 1024;  // QVGA JPEGs are ~8-20 KB
 
-bool Camera::begin() {
+bool Camera::initSensor() {
   // CoreS3 GC0308 wiring, as in M5Stack's M5CoreS3 library (GC0308.cpp).
   // XCLK comes from an oscillator on the board, so there's no clock pin.
   camera_config_t cfg = {};
@@ -44,25 +44,52 @@ bool Camera::begin() {
   cfg.sccb_i2c_port = -1;
 
   // The camera's control bus is the board's internal I2C. M5Stack's own
-  // CoreS3 camera code releases it first; M5Unified takes it back as needed.
+  // CoreS3 camera code releases it first. The camera only needs it for the
+  // setup below, so hand it straight back: the two drivers share the pins,
+  // and with the camera's left holding them every other chip went silent
+  // (2026-10-28).
   M5.In_I2C.release();
-  if (esp_camera_init(&cfg) != ESP_OK) {
+  sensorUp_ = esp_camera_init(&cfg) == ESP_OK;
+  if (sensorUp_) {
+    sensor_t* s = esp_camera_sensor_get();
+    if (s != nullptr) {
+      s->set_vflip(s, CAMERA_VFLIP ? 1 : 0);
+      s->set_hmirror(s, CAMERA_HMIRROR ? 1 : 0);
+    }
+  } else {
     Serial.println(F("camera: init failed"));
-    return false;
   }
-  sensor_t* s = esp_camera_sensor_get();
-  if (s != nullptr) {
-    s->set_vflip(s, CAMERA_VFLIP ? 1 : 0);
-    s->set_hmirror(s, CAMERA_HMIRROR ? 1 : 0);
-  }
+  M5.In_I2C.begin();
+  return sensorUp_;
+}
 
-  latest_ = static_cast<uint8_t*>(ps_malloc(LATEST_CAP));
+bool Camera::begin() {
+  initSensor();
+  if (latest_ == nullptr) latest_ = static_cast<uint8_t*>(ps_malloc(LATEST_CAP));
   latestCap_ = latest_ ? LATEST_CAP : 0;
-  ok_ = latest_ != nullptr;
+  ok_ = sensorUp_ && latest_ != nullptr;
   // Core 0 at low priority: encoding is the heaviest thing on the robot, and
   // the face animation on core 1 shouldn't stutter for it.
   // Its stack in PSRAM, like the frames: internal RAM is what the robot runs short of.
-  if (ok_) xTaskCreatePinnedToCoreWithCaps(taskEntry, "camera", 6144, this, 1, nullptr, 0, MALLOC_CAP_SPIRAM);
+  // Started even if the sensor didn't come up, so restart() can bring it back later.
+  if (latest_ != nullptr && !taskStarted_) {
+    taskStarted_ = true;
+    xTaskCreatePinnedToCoreWithCaps(taskEntry, "camera", 6144, this, 1, nullptr, 0, MALLOC_CAP_SPIRAM);
+  }
+  return ok_;
+}
+
+bool Camera::restart() {
+  paused_ = true;
+  for (int i = 0; i < 100 && busy_; ++i) delay(10);  // a frame in progress finishes (~150 ms at most)
+  if (sensorUp_) {
+    esp_camera_deinit();
+    sensorUp_ = false;
+  }
+  initSensor();
+  ok_ = sensorUp_ && latest_ != nullptr;
+  paused_ = false;
+  Serial.printf("camera: restarted, %s\n", ok_ ? "ready" : "still not answering");
   return ok_;
 }
 
@@ -91,7 +118,8 @@ void Camera::taskEntry(void* self) { static_cast<Camera*>(self)->task(); }
 
 void Camera::task() {
   for (;;) {
-    if (!streaming_) {
+    busy_ = streaming_ && sensorUp_ && !paused_;
+    if (!busy_) {
       vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
@@ -122,6 +150,7 @@ void Camera::task() {
       }
       free(jpg);
     }
+    busy_ = false;
     uint32_t spent = millis() - t0;
     uint32_t interval = intervalMs_;
     vTaskDelay(pdMS_TO_TICKS(spent < interval ? interval - spent : 1));

@@ -2,8 +2,9 @@
 
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <esp_system.h>
 
-static const char* FW_VERSION = "0.6.10.0";
+static const char* FW_VERSION = "0.6.10.13";
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
@@ -79,10 +80,39 @@ void Link::update(uint32_t nowMs) {
   // loop() falls behind as soon as a pass also sends a camera frame: gaps in
   // the voice, and a heartbeat reply stuck behind audio until the link gives
   // up. So read everything that's waiting, for a few ms at most. (From the
-  // original V2.)
+  // original V2.) The same while connecting: the library reads the brain's
+  // handshake reply a line per call, so one call per pass of a slow loop
+  // (300-400 ms with the face's demo cycle) took ~2 s and the hello came too
+  // late for the brain, over and over after a power-on (2026-10-28).
   uint32_t t0 = millis();
   ws_.loop();
-  for (int i = 1; connected_ && i < 32 && millis() - t0 < 12; ++i) ws_.loop();
+  for (int i = 1; i < 32 && millis() - t0 < 12; ++i) ws_.loop();
+}
+
+const char* Link::bootReason() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON: return "power on";
+    case ESP_RST_SW: return "restart";  // OTA, or asked
+    case ESP_RST_PANIC: return "crash";
+    case ESP_RST_INT_WDT: return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+    case ESP_RST_EXT: return "reset pin";
+    case ESP_RST_USB: return "USB";
+    default: return "unknown";
+  }
+}
+
+void Link::sendNote(const char* text) {
+  if (!connected_) return;
+  JsonDocument doc;
+  doc["type"] = "note";
+  doc["text"] = text;
+  String out;
+  serializeJson(doc, out);
+  sendJson(out);
 }
 
 void Link::sendJson(const String& json) {
@@ -124,6 +154,8 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
       doc["token"] = token_;  // the brain drops connections without it
       if (wakeWord_) doc["wake"] = wakeWord_;
       if (asleep_) doc["asleep"] = asleep_();
+      doc["up_s"] = millis() / 1000;  // a small number: it has just started
+      doc["boot"] = bootReason();
       String out;
       serializeJson(doc, out);
       sendJson(out);

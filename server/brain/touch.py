@@ -5,7 +5,7 @@ The robot sends a tap (with its zones and how hard, 1-3) when a short touch lift
 (a swipe, either way), and a hand resting there for 1 s and 3 s (a hold). Here:
   pat      one tap: a fist bump
   double   two taps close together: its attention, like the wake word (it wakes for it)
-  bonk     a hard tap (TOUCH_BONK_LEVEL): indignation
+  bonk     a hard tap (TOUCH_BONK_LEVEL, off by default): indignation
   pet      one or two strokes
   scratch  several quick strokes: a bigger, happier answer
   lean     the first stroke, at once: it leans into the hand
@@ -33,7 +33,7 @@ class Touches:
                 level = int(event.get("level") or 0)
             except (TypeError, ValueError):
                 level = 0
-            if level >= config.TOUCH_BONK_LEVEL:
+            if config.TOUCH_BONK_LEVEL and level >= config.TOUCH_BONK_LEVEL:
                 self._tap_at = None
                 return ["bonk"]
             if self._tap_at is not None and now - self._tap_at <= config.TOUCH_DOUBLE_SECONDS:

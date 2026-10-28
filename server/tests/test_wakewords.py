@@ -93,7 +93,10 @@ class TouchTests(unittest.TestCase):
         t.feed({"g": "tap", "level": 2}, 2.0)
         self.assertEqual(t.feed({"g": "tap", "level": 1}, 2.3), ["double"])
         self.assertEqual(t.poll(3.0), [])
-        self.assertEqual(t.feed({"g": "tap", "level": 3}, 4.0), ["bonk"])
+        self.assertEqual(t.feed({"g": "tap", "level": 3}, 4.0), [])   # bonks are off: a full tap is a pat
+        self.assertEqual(t.poll(5.0), ["pat"])
+        with patch.object(config, "TOUCH_BONK_LEVEL", 3):
+            self.assertEqual(t.feed({"g": "tap", "level": 3}, 6.0), ["bonk"])
 
     def test_strokes_and_holds(self):
         from brain.touch import Touches

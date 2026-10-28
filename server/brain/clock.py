@@ -33,6 +33,23 @@ def is_zone_name(text: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z_]+(/[A-Za-z0-9_+-]+)+", text or ""))
 
 
+def _zone_files(name: str):
+    """The zone's TZif file contents: from the system's zone folders, then the tzdata package (Windows has no
+    folders; without the package it has no rules at all)."""
+    for base in zoneinfo.TZPATH:
+        try:
+            with open(os.path.join(base, *name.split("/")), "rb") as f:
+                yield f.read()
+        except OSError:
+            continue
+    try:
+        from importlib import resources
+
+        yield resources.files("tzdata.zoneinfo").joinpath(*name.split("/")).read_bytes()
+    except (ImportError, OSError, ValueError):
+        pass
+
+
 def posix_tz() -> str:
     """The robot's time zone as a POSIX rule: CLOCK_TZ (a zone name like America/Los_Angeles, or a rule as it is),
     else this computer's."""
@@ -40,15 +57,13 @@ def posix_tz() -> str:
         return config.CLOCK_TZ
     name = config.CLOCK_TZ or _zone_name()
     if name:
-        for base in zoneinfo.TZPATH:
-            path = os.path.join(base, *name.split("/"))
+        for data in _zone_files(name):
             try:
-                with open(path, "rb") as f:
-                    footer = f.read().rstrip(b"\n").rsplit(b"\n", 1)[-1].decode("ascii")
-                if footer and not footer.startswith("TZif") and len(footer) <= 60:
-                    return footer
-            except (OSError, UnicodeDecodeError):
+                footer = data.rstrip(b"\n").rsplit(b"\n", 1)[-1].decode("ascii")
+            except UnicodeDecodeError:
                 continue
+            if footer and not footer.startswith("TZif") and len(footer) <= 60:
+                return footer
     # No zone database: the offset in effect now, with no daylight-saving rule.
     offset = time.altzone if time.localtime().tm_isdst > 0 else time.timezone  # seconds west of UTC
     hours, minutes = divmod(abs(offset) // 60, 60)

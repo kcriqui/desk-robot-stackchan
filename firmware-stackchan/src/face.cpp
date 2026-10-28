@@ -159,6 +159,8 @@ bool Face::applyPackJson(const char* json, bool save) {
   n.glint = p["glint"] | true;
   const char* mouth = p["mouth"] | "talk";
   n.mouth = !strcmp(mouth, "always") ? 1 : !strcmp(mouth, "never") ? 2 : 0;
+  n.mouthW = constrain(p["mouth_w"] | 14.0f, 6.0f, 60.0f);
+  n.mouthTilt = constrain(p["mouth_tilt"] | 0.0f, 0.0f, 10.0f);
   n.color = static_cast<uint32_t>(readColor(p["color"], static_cast<int32_t>(n.color)));
   readEye(p["asleep"], n.asleep);
   readPanel(p["plate"], n.plate, 96.0f);
@@ -325,6 +327,7 @@ void Face::stepAnimation(uint32_t nowMs) {
   morph(curL_, sleepLook() ? pack_.asleep : look.l, f);
   morph(curR_, sleepLook() ? pack_.asleep : look.r, f);
   smile_ = approach(smile_, sleepLook() ? 0 : look.smile, f);
+  tilt_ = approach(tilt_, sleepLook() || talking_ ? 0 : tiltTarget_, 0.15f);
 
   pop_ *= 0.82f;
   squint_ *= 0.85f;
@@ -390,6 +393,11 @@ void Face::stepAnimation(uint32_t nowMs) {
       // Mostly return to center so the robot doesn't look shifty.
       if (random(100) < 40) gazeTargetX_ = gazeTargetY_ = 0;
       nextSaccadeMs_ = nowMs + random(1200, 4000);
+      if (pack_.mouthTilt > 0) {  // the original StackChan's idle mouth: now and then a little crooked
+        long r = random(100);
+        if (r < 15) tiltTarget_ = random(-100, 101) / 100.0f * pack_.mouthTilt;
+        else if (r < 45) tiltTarget_ = 0;
+      }
     }
     if (nowMs >= nextPupilMs_) {
       // The pupils look at something new: a quick dart, about a third of the time back near the middle.
@@ -663,19 +671,19 @@ void Face::drawMouth(int cx, int cy, int eyeBottom) {
   float my0 = floorf(cy + curL_.h * 0.5f);
   if (mouth_ >= 0.05f && pack_.mouth != 2) {
     float mh = 2 + mouth_ * 9;
-    float mw = 20 + mouth_ * 8;
+    float mw = fmaxf(20, pack_.mouthW * 0.7f) + mouth_ * 8;  // a wide resting mouth talks a little wider
     float my = my0 + 4;
     if (my + mh > SCREEN_H - 1) my = SCREEN_H - 1 - mh;
     roundBox(cx - mw / 2, my, mw, mh, fminf(mh / 2, 4), FaceGfx::EYE);
     if (mh > 6) roundBox(cx - mw / 2 + 3, my + 2, mw - 6, mh - 4, 2, FaceGfx::PUPIL);  // darker inside, wide open
   } else if (pack_.mouth == 1) {
     // Resting mouth: a short curve, smiling or frowning, two face pixels thick.
-    const int mw = 14;
+    const int mw = static_cast<int>(pack_.mouthW);
     float my = fminf(my0 + 6, SCREEN_H - 4);
     float px = 0, py = 0;
     for (int i = 0; i <= mw; ++i) {
       float t = (i - mw * 0.5f) / (mw * 0.5f);
-      float x = cx - mw / 2 + i, y = my + smile_ * (1 - t * t) + 0.5f;
+      float x = cx - mw / 2 + i, y = my + smile_ * (1 - t * t) + (i - mw * 0.5f) * tilt_ * (PI / 180) + 0.5f;
       if (i > 0) gfx_.line((px + 0.5f) * S, (py + 0.5f) * S, (x + 0.5f) * S, (y + 0.5f) * S, S, FaceGfx::EYE);
       px = x;
       py = y;

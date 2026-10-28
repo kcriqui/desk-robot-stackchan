@@ -8,17 +8,17 @@ from brain import battery
 class BatteryTests(unittest.TestCase):
     def test_percent_follows_the_curve(self):
         self.assertEqual(battery.percent(3.0), 0)
-        self.assertEqual(battery.percent(3.80), 50)
+        self.assertEqual(battery.percent(3.73), 50)
         self.assertEqual(battery.percent(4.3), 100)
         self.assertTrue(battery.percent(3.7) < battery.percent(3.9) < battery.percent(4.1))
 
     def test_on_battery(self):
-        r = battery.Reading(3.80, 400, 0.0)
+        r = battery.Reading(3.73, 400, 0.0)
         self.assertTrue(r.on_battery)
         self.assertFalse(r.charging)
-        self.assertEqual(r.minutes_left(), round(550 * 0.5 / 400 * 60))
+        self.assertEqual(r.minutes_left(), round(battery.CAPACITY_MAH * 0.5 / 400 * 60))
         self.assertIn("about 50%", r.describe(now=5.0))
-        self.assertEqual(r.short(), "50% · 3.80 V")
+        self.assertEqual(r.short(), "50% · 3.73 V")
 
     def test_charging_and_usb_power(self):
         charging = battery.Reading(4.02, -350, 0.0)

@@ -11,6 +11,8 @@ A pack is one JSON file. The built-in ones are in server/faces/ (in the repo); y
       "gap": 16, "y": 0,                    eye spacing, eye height (+ = lower)
       "cyclops": false, "outline": false,   one eye in the middle; outlined eyes
       "glint": true, "mouth": "talk",       pupils that look around; mouth: talk | always | never
+      "mouth_w": 14,                        the resting mouth's width (firmware-stackchan 0.6.10.1+)
+      "mouth_tilt": 3,                      idle, it now and then tilts up to this many degrees (0.6.10.3+)
       "color": "#F4F1EA",                   the eyes' colour (each emotion may have its own "color")
       "asleep": {eye},                      the shut eyes while sleeping
       "plate": {panel}, "socket": {panel},  a face behind the eyes and the socket an eye sits in (optional)
@@ -119,6 +121,10 @@ def clean(pack) -> dict:
     if mouth not in MOUTHS:
         raise ValueError(f"mouth must be one of: {', '.join(MOUTHS)}")
     out["mouth"] = mouth
+    if "mouth_w" in pack:
+        out["mouth_w"] = _num(pack["mouth_w"], 6, 60, "mouth_w")
+    if "mouth_tilt" in pack:
+        out["mouth_tilt"] = _num(pack["mouth_tilt"], 0, 10, "mouth_tilt")
     if "color" in pack:
         out["color"] = _color(pack["color"], "color")
     out["asleep"] = _eye(pack.get("asleep"), "asleep")

@@ -58,6 +58,18 @@ class CharacterFileTests(unittest.TestCase):
              **fields}
         (self.path / f"{name}.json").write_text(json.dumps(c), encoding="utf-8")
 
+    def test_a_character_can_talk_longer(self):
+        self.write("long", max_sentences=8)
+        personality.use("long")
+        self.assertEqual(personality.max_sentences(), 8)
+        self.assertIn("One to 8 sentences", personality.SYSTEM_PROMPT)
+        self.assertEqual(personality.to_dict(personality.load("long"))["max_sentences"], 8)   # kept when saved
+        personality.use("rocky")
+        self.assertEqual(personality.max_sentences(), config.REPLY_MAX_SENTENCES)
+        self.write("bad", max_sentences=40)
+        with self.assertRaises(ValueError):
+            personality.load("bad")
+
     def test_switching_changes_prompt_lines_voice_and_face(self):
         self.write("unit", lines={"wake": "Ready, {human}."}, leads={"search": "Querying."},
                    voice={"piper": "en_US-kristin-medium", "pitch": 1, "intonation": 0}, face="visor")

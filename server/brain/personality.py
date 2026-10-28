@@ -67,6 +67,8 @@ class Character:
     pronouns: str = "they"                      # one of PRONOUNS: for the model, and the live view's wording
     # Phrases that wake the robot as this character, written as they sound (wakewords.py); [] = "hey <name>".
     wake_words: list[str] = field(default_factory=list)
+    # The longest reply, in sentences (past it, the rest isn't spoken); 0 = config.REPLY_MAX_SENTENCES.
+    max_sentences: int = 0
 
 
 # Who they are to others: (subject, object, possessive).
@@ -224,7 +226,7 @@ def _shared(c: Character) -> str:
     return f"""You live in a small desk robot: {_body()} you talk through.
 
 How you talk (this matters most: your words are spoken aloud by a speaker):
-- Short. One to {config.REPLY_MAX_SENTENCES} sentences, never more: anything past that is cut off before \
+- Short. One to {max_sentences(c)} sentences, never more: anything past that is cut off before \
 it is spoken.
 {c.style}
 - No lists, no markdown, no emoji, nothing that cannot be spoken.
@@ -272,6 +274,11 @@ Every reply MUST start with an emotion tag in square brackets, chosen from: {", 
 The tag sets your face while you speak. {c.emotions}"""
 
 
+def max_sentences(c: Character | None = None) -> int:
+    """The longest reply, in sentences, for this character (the active one by default)."""
+    return (c or CHARACTER).max_sentences or config.REPLY_MAX_SENTENCES
+
+
 def name(c: Character | None = None) -> str:
     """What the robot is called while being this character (the active one by default): Rocky goes by
     ROBOT_NAME (e.g. RockyChan), anyone else by their own name. Each has its own wake words (wake_words())."""
@@ -288,7 +295,7 @@ def _fill(text: str, c: Character) -> str:
     rename = (f" In this body your human calls you {config.ROBOT_NAME}; answer to it."
               if c.id == ROCKY.id and config.ROBOT_NAME != "Rocky" else "")
     return (text.replace("{rename}", rename).replace("{human}", config.HUMAN_NAME)
-            .replace("{robot}", name(c)).replace("{sentences}", str(config.REPLY_MAX_SENTENCES)))
+            .replace("{robot}", name(c)).replace("{sentences}", str(max_sentences(c))))
 
 
 def build_prompt(c: Character) -> str:
@@ -394,6 +401,9 @@ def parse(char_id: str, d) -> Character:
     wake = list(dict.fromkeys(" ".join(w.lower().split()) for w in wake if w.strip()))
     if len(wake) > 6 or any(len(w) > 32 or not re.fullmatch(r"[a-z' ]+", w) for w in wake):
         raise ValueError(f"{char_id}: wake words are up to 6 phrases of letters and spaces, 32 characters each")
+    most = d.get("max_sentences") or 0
+    if isinstance(most, bool) or not isinstance(most, int) or not 0 <= most <= 12:
+        raise ValueError(f"{char_id}: max_sentences is a whole number from 1 to 12 (0 = the usual)")
     voice = dict(d.get("voice", {}))
     if voice:
         if voice.get("piper") not in config.PIPER_VOICES:
@@ -416,14 +426,16 @@ def parse(char_id: str, d) -> Character:
     return Character(id=char_id, name=name, description=text("description", False, 1000),
                      identity=text("identity"), style=text("style", False), emotions=text("emotions", False, 1000),
                      examples=[e.strip() for e in examples], leads=leads, lines=lines,
-                     voice=voice, face=text("face", False, 80), pronouns=pronouns, wake_words=wake)
+                     voice=voice, face=text("face", False, 80), pronouns=pronouns, wake_words=wake,
+                     max_sentences=most)
 
 
 def to_dict(c: Character) -> dict:
     """A character as its file holds it."""
     return {"name": c.name, "pronouns": c.pronouns, "description": c.description, "identity": c.identity, "style": c.style,
             "emotions": c.emotions, "examples": c.examples, "leads": c.leads, "lines": c.lines,
-            "voice": c.voice, "face": c.face, "wake_words": c.wake_words}
+            "voice": c.voice, "face": c.face, "wake_words": c.wake_words,
+            **({"max_sentences": c.max_sentences} if c.max_sentences else {})}
 
 
 def wake_words(c: Character | None = None) -> list[str]:

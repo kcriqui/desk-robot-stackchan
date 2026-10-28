@@ -25,6 +25,8 @@ _dir: str | None = None  # install() sets it: where the day files go (None: no f
 _days = 14
 _file = None
 _file_day = ""
+RETRY_S = 10.0  # after a failed write, the wait before opening the file again
+_retry_at = 0.0
 
 
 def stamp(at: float | None = None) -> str:
@@ -42,10 +44,11 @@ def add(text: str) -> None:
 
 
 def _to_file(line: str) -> None:
-    """Append a line to today's file (under _lock). A file that can't be written is given up on quietly: printing
-    the error would only come back here."""
-    global _file, _file_day, _dir
-    if _dir is None:
+    """Append a line to today's file (under _lock). A failed write drops the file and tries a fresh one RETRY_S
+    later, quietly (printing the error would only come back here): on the PC the logs are on the NAS share, whose
+    open file goes stale when the PC sleeps, and giving up for good lost a whole night (2026-10-27)."""
+    global _file, _file_day, _retry_at
+    if _dir is None or time.monotonic() < _retry_at:
         return
     day = time.strftime("%Y-%m-%d")
     try:
@@ -61,7 +64,12 @@ def _to_file(line: str) -> None:
         _file.write(line + "\n")
         _file.flush()
     except OSError:
-        _dir = None
+        try:
+            if _file is not None:
+                _file.close()
+        except OSError:
+            pass
+        _file, _file_day, _retry_at = None, "", time.monotonic() + RETRY_S
 
 
 def since(after: int) -> tuple[int, list[str]]:
