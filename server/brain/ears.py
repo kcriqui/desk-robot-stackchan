@@ -353,8 +353,10 @@ class Ears:
         device: int | str | None = config.MIC_DEVICE,
         spotter=None,
         on_keyword: Callable[[str, float], None] | None = None,
+        voices=None,
     ) -> None:
         self.on_utterance = on_utterance
+        self.voices = voices  # speakers.Voices, or None: who's talking
         # The wake-word spotter (kws.Spotter, or None) and what to call when it hears one: on its own thread, so
         # a slow transcription never delays a wake. Recent hits are kept for the recordings.
         self.spotter = spotter
@@ -528,6 +530,8 @@ class Ears:
                           f"{second!r} in {time.time() - t1:.2f}s, using that)")
                     text = second
             if text:
+                if self.voices is not None:  # whose voice, before the text goes on (~45 ms)
+                    self.voices.hear(utterance)
                 self.on_utterance(text, segmenter.started_at, segmenter.ended_at)
             t0, t1 = segmenter.started_at, segmenter.ended_at
             self._recorder.save(utterance, {

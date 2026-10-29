@@ -238,6 +238,12 @@ TOOLS = [
                     "days": {"type": "number", "description": (
                         "Only for facts that stop being true (\"has a cold\": 7, \"guests this "
                         "weekend\": 3). Omit for lasting facts.")},
+                    "about": {"type": "string", "description": (
+                        "Whose fact it is: the person's first name, or \"everyone\" for the household or "
+                        "yourself. Omit for the person you're talking to.")},
+                    "only_you": {"type": "boolean", "description": (
+                        "True only for something that belongs to this personality alone (a running joke, "
+                        "a promise made in character). Your other personalities share everything else.")},
                 },
                 "required": ["fact"],
             },
@@ -255,6 +261,36 @@ TOOLS = [
                 "type": "object",
                 "properties": {"about": {"type": "string"}},
                 "required": ["about"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "learn_voice",
+            "description": (
+                "Learn someone's voice so you can recognise it later, by interviewing them: call this when "
+                "someone asks you to learn their voice (or a friend's), with the person's name, then ask them "
+                "open questions until you're told you have enough. stop: true to call the interview off."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The person's first name."},
+                    "stop": {"type": "boolean"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "forget_voice",
+            "description": "Forget a voice you learned, by the person's name, when asked to.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
             },
         },
     },

@@ -153,7 +153,7 @@ void ClockScreen::timeText(char* out, size_t n) const {
   }
 }
 
-// WiFi bars at the top left; the battery at the top right: "charging", "USB", or the charge on battery.
+// WiFi bars at the top left; the battery at the top right: the charge (with a bolt while charging), or "USB".
 void ClockScreen::drawStatus() {
   auto& d = M5.Display;
   shownStatus_ = statusSeq_;
@@ -174,7 +174,7 @@ void ClockScreen::drawStatus() {
   uint16_t fill = percent_ >= 40 ? d.color565(0x6A, 0xD2, 0x6A) : percent_ >= 15 ? amber() : d.color565(0xFF, 0x4A, 0x3D);
   d.drawRect(bx, by, bw, bh, grey());
   d.fillRect(bx + bw, by + 3, 3, bh - 6, grey());
-  int level = power_ == 0 ? constrain(percent_, 0, 100) : 100;
+  int level = power_ == 2 ? 100 : constrain(percent_, 0, 100);
   if (power_ != 0) fill = d.color565(0x6A, 0xD2, 0x6A);
   d.fillRect(bx + 2, by + 2, (bw - 4) * level / 100, bh - 4, fill);
   if (power_ == 1) {
@@ -187,8 +187,7 @@ void ClockScreen::drawStatus() {
   d.setTextDatum(middle_right);
   d.setTextColor(grey(), TFT_BLACK);
   char txt[12];
-  if (power_ == 1) strlcpy(txt, "charging", sizeof txt);
-  else if (power_ == 2) strlcpy(txt, "USB", sizeof txt);
+  if (power_ == 2) strlcpy(txt, "USB", sizeof txt);
   else snprintf(txt, sizeof txt, "%d%%", percent_);
   d.drawString(txt, bx - 6, by + bh / 2 + 1);
 }

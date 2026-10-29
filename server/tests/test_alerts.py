@@ -12,7 +12,7 @@ from brain.timers import Timers, when
 
 
 def on_battery(volts, at):
-    return Reading(volts, 300, at)
+    return Reading(volts, 240, at)  # the curve's own draw: the voltages mean what the curve says
 
 
 class BatteryWatchTests(unittest.TestCase):
@@ -29,9 +29,9 @@ class BatteryWatchTests(unittest.TestCase):
         self.assertIsNone(self.feed(w, 3.87, 0))                      # ~70%: fine
         self.assertEqual(self.feed(w, 3.60, 100), "battery_low")      # ~17%
         self.assertIsNone(self.feed(w, 3.60, 200))                    # once only at this level
-        self.assertEqual(self.feed(w, 3.54, 300), "battery_very_low")  # ~9%
-        self.assertIsNone(self.feed(w, 3.54, 400))                    # not again within 10 min
-        self.assertEqual(self.feed(w, 3.54, 400 + 11 * 60), "battery_very_low")
+        self.assertEqual(self.feed(w, 3.52, 300), "battery_very_low")  # ~9%
+        self.assertIsNone(self.feed(w, 3.52, 400))                    # not again within 10 min
+        self.assertEqual(self.feed(w, 3.52, 400 + 11 * 60), "battery_very_low")
         self.assertEqual(self.feed(w, 3.45, 2000), "battery_critical")  # ~4%
         self.assertEqual(self.feed(w, 3.45, 2000 + 3 * 60), "battery_critical")  # every 2 min
 
@@ -122,7 +122,7 @@ class PowerOffWatchTests(unittest.TestCase):
             self.assertIsNone(w.check(r, False, False, t))
 
     def test_on_a_power_bank_only_when_the_pack_is_gone_and_the_battery_below_half(self):
-        half = on_battery(3.72, 0).percent
+        half = on_battery(3.70, 0).percent
         self.assertLess(half, config.POWER_BANK_OFF_PERCENT)   # the reading used below
         with unittest.mock.patch.object(config, "POWER_BANK", True):
             w = alerts.PowerOffWatch()
@@ -130,11 +130,11 @@ class PowerOffWatchTests(unittest.TestCase):
             self.assertIsNone(key)
             w = alerts.PowerOffWatch()
             for t in range(0, self.IDLE, 10):   # the pack is still going: USB
-                self.assertIsNone(w.check(Reading(3.72, -300, t), True, False, t))
+                self.assertIsNone(w.check(Reading(3.70, -300, t), True, False, t))
             w = alerts.PowerOffWatch()
-            key, _ = self.run_until(w, 3.72, False, False, 0, 600)   # pack gone, below half, but awake
+            key, _ = self.run_until(w, 3.70, False, False, 0, 600)   # pack gone, below half, but awake
             self.assertIsNone(key)
-            key, at = self.run_until(w, 3.72, True, True, 610, 700)  # ...then asleep: off, timers or not
+            key, at = self.run_until(w, 3.70, True, True, 610, 700)  # ...then asleep: off, timers or not
             self.assertEqual((key, at), ("power_off_bank", 610))
             w = alerts.PowerOffWatch()
             key, _ = self.run_until(w, 3.40, False, True, 0, 100)   # nearly flat: off at once, as ever

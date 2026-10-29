@@ -44,7 +44,8 @@ import time
 
 import websockets
 
-from . import alerts, battery, clock, config, faces, kws, logbook, mouth, personality, settings, touch, wakewords, weather, web
+from . import (alerts, battery, clock, config, faces, kws, logbook, mouth, personality, settings, speakers, touch,
+               wakewords, weather, web)
 from .body import Body
 from .dance import Dancer, length as dance_length
 from .memories import Memories
@@ -95,7 +96,8 @@ last_visual_at = 0.0  # when a question last came with a picture, or he last use
 timers = Timers(config.TIMER_FILE)
 body: Body | None = None      # small head moves while he talks (body.py)
 dancer: Dancer | None = None  # his four head dances (dance.py)
-memories = Memories(config.MEMORY_FILE)
+memories = Memories(config.MEMORY_FILE, owner=config.HUMAN_NAME)
+voices = speakers.Voices() if speakers.available() else None  # whose voice it hears (speakers.py)
 said_unasked: list[tuple[float, str]] = []  # (when, what) he said on his own, newest last
 
 FRAME_BYTES = 3200  # 100 ms of 16 kHz s16le per audio frame to the robot
@@ -420,8 +422,8 @@ async def handle_console_line(line: str) -> bool:
             await power_off("power_off_asked")  # the goodbye, then the robot powers off
     elif cmd == "memories":
         facts = memories.facts()
-        print("\n".join(f"  #{f.id} {f.text}  ({f.added}" + (f" to {f.until})" if f.until else ")")
-                        for f in facts) or "  (remembers nothing yet)")
+        print("\n".join(f"  #{f.id} [{f.about or 'everyone'}] {f.text}  ({f.added}" + (f" to {f.until}" if f.until else "")
+                        + (f", {f.by} only" if f.only else "") + ")" for f in facts) or "  (remembers nothing yet)")
     elif cmd == "remember":
         print(remember({"fact": arg})[0] if arg else "usage: remember <fact>")
     elif cmd == "forget":
@@ -566,6 +568,8 @@ async def set_asleep(on: bool) -> None:
             body.stop()
         if dancer is not None:
             dancer.stop()
+        if voices is not None and (name := voices.stop_learning()):
+            print(f"  (voice: stopped learning {name}'s, asleep)")
     if on and tracker is not None and tracker.enabled:
         await set_tracking(False, announce=False)
         resume_tracking = True
@@ -613,6 +617,8 @@ def situation() -> str:
                   else " Battery: on USB power" + (", charging." if b.charging else "."))
     if eyes.temperature is not None and eyes.temperature >= config.TEMP_WARN_C:
         state += f" Your chip is hot ({eyes.temperature:.0f} C)."
+    if voices is not None:
+        state += voices.describe()
     return state
 
 
@@ -649,14 +655,33 @@ def _listed(facts) -> str:
     return "; ".join(f"#{f.id} {f.text.rstrip('.')}" for f in facts)
 
 
+def _character_id(cid) -> str:
+    """A personality's id from the live view ("" = all of them). Raises ValueError for one that doesn't exist."""
+    cid = str(cid or "")
+    if cid and cid not in {c.id for c in characters()}:
+        raise ValueError(f"no personality {cid!r}")
+    return cid
+
+
+def _talking() -> str | None:
+    """Who's talking, when the voice says so for sure (speakers.py); None when it can't tell."""
+    g = voices.last if voices is not None else None
+    return g.name if g is not None and g.name and g.sure and time.time() - g.at < 120 else None
+
+
 def remember(args: dict) -> tuple[str, bytes | None]:
     days = args.get("days")
+    about = str(args.get("about") or "").strip() or _talking()  # None: the owner
     try:
-        fact, new = memories.add(str(args.get("fact") or ""), float(days) if days not in (None, "") else None)
+        fact, new = memories.add(str(args.get("fact") or ""), float(days) if days not in (None, "") else None,
+                                 about=about, by=personality.CHARACTER.id, only=bool(args.get("only_you")))
     except (TypeError, ValueError) as e:
         return (f"Not remembered: {e}.", None)
-    print(f"  (memory {'+' if new else '='} #{fact.id} {fact.text}" + (f", until {fact.until}" if fact.until else "") + ")")
-    return ((f"Remembered as #{fact.id}" if new else f"You already remembered that (#{fact.id}); refreshed")
+    whose = f"about {fact.about}" if fact.about else "about everyone"
+    print(f"  (memory {'+' if new else '='} #{fact.id} {fact.text} [{whose}" + (", only you" if fact.only else "")
+          + (f", until {fact.until}" if fact.until else "") + "])")
+    return ((f"Remembered as #{fact.id}, {whose}" if new else f"You already remembered that (#{fact.id}); refreshed")
+            + (" (only you, not your other personalities)" if fact.only else "")
             + (f", until {fact.until}." if fact.until else ", for good."), None)
 
 
@@ -668,6 +693,29 @@ def forget(args: dict) -> tuple[str, bytes | None]:
                                        if left else "Your memory is empty."), None)
     print(f"  (memory - {_listed(gone)})")
     return (f"Forgotten: {_listed(gone)}.", None)
+
+
+def learn_voice(args: dict) -> tuple[str, bytes | None]:
+    name = " ".join(str(args.get("name") or "").split())[:40]
+    if args.get("stop"):
+        was = voices.stop_learning()
+        return (f"Stopped learning {was}'s voice; nothing was kept." if was else "You weren't learning a voice.", None)
+    if not name:
+        return ("Whose voice? Ask their name first.", None)
+    voices.start_learning(name)
+    print(f"  (voice: learning {name}'s)")
+    again = name.lower() in (n.lower() for n in voices.people())
+    return (f"{'Relearning' if again else 'Learning'} {name}'s voice: their answers from now on count, until about "
+            f"{config.LEARN_VOICE_SECONDS:.0f} seconds of their speech. Interview {name} now: explain briefly, then "
+            "ask your first open question. Only their answers should be heard, so others should stay quiet.", None)
+
+
+def forget_voice(args: dict) -> tuple[str, bytes | None]:
+    gone = voices.forget(str(args.get("name") or ""))
+    if gone:
+        print(f"  (voice: forgot {gone}'s)")
+    return (f"Forgot {gone}'s voice." if gone else
+            "No such voice. " + (f"You know: {', '.join(voices.people())}." if voices.people() else "You know none."), None)
 
 
 def web_search(args: dict) -> tuple[str, bytes | None]:
@@ -945,6 +993,8 @@ ABILITIES.update(check_temperature=check_temperature, set_timer=set_timer, cance
 searcher = web.WebSearch() if web.available() else None
 if searcher is not None:  # Anthropic as the provider (web.py)
     ABILITIES["web_search"] = web_search
+if voices is not None:  # sherpa-onnx installed (speakers.py)
+    ABILITIES.update(learn_voice=learn_voice, forget_voice=forget_voice)
 if config.BODY == "stackchan":  # the original body has no battery sensor
     ABILITIES["check_battery"] = check_battery
 
@@ -1307,7 +1357,9 @@ def console_state() -> dict:
         "wake_words": [{"phrase": e.phrase, "owner": e.owner} for e in wake_table] if robot_wake_word is None else [],
         "powered_off": ({"why": powered_off[0], "at": time.strftime("%H:%M", time.localtime(powered_off[1]))}
                         if powered_off is not None and robot_socket is None else None),
-        "memories": [{"id": f.id, "text": f.text, "added": f.added, "until": f.until} for f in memories.facts()],
+        "memories": [{"id": f.id, "text": f.text, "added": f.added, "until": f.until, "about": f.about, "by": f.by,
+                      "only": f.only} for f in memories.facts()],
+        "people": list(dict.fromkeys(memories.people() + (voices.people() if voices is not None else []))),
     }
 
 
@@ -1470,8 +1522,21 @@ async def _console_command(action: str, payload: dict) -> dict:
         print("console: power off")
         asyncio.create_task(power_off("power_off_asked"))
     elif action == "remember":
-        fact, _ = memories.add(str(payload.get("text", "")))  # a ValueError goes back to the page
-        print(f"console: remember #{fact.id} {fact.text}")
+        keep_to = _character_id(payload.get("keep_to"))
+        fact, _ = memories.add(str(payload.get("text", "")), about=payload.get("about"),  # a ValueError goes back
+                               by=keep_to, only=bool(keep_to))
+        print(f"console: remember #{fact.id} {fact.text} [{fact.about or 'everyone'}"
+              + (f", {fact.by} only" if fact.only else "") + "]")
+    elif action == "edit_memory":
+        try:
+            fid = int(payload.get("id"))
+        except (TypeError, ValueError):
+            raise ValueError("id must be a number")
+        keep_to = payload.get("keep_to")
+        f = memories.edit(fid, text=payload.get("text"), about=payload.get("about"), until=payload.get("until"),
+                          keep_to=None if keep_to is None else _character_id(keep_to))
+        print(f"console: memory #{f.id} is now {f.text} [{f.about or 'everyone'}"
+              + (f", until {f.until}" if f.until else "") + (f", {f.by} only" if f.only else "") + "]")
     elif action == "forget":
         try:
             fid = int(payload.get("id"))
@@ -1541,6 +1606,7 @@ async def start_listening() -> None:
                 spotter=spotter,
                 on_keyword=lambda phrase, at: loop.call_soon_threadsafe(
                     lambda: asyncio.create_task(on_wake_phrase(phrase, at))),
+                voices=voices,
             ),
         )
         # Asleep or out of awake time, he needs his name to answer. When the
@@ -1628,7 +1694,7 @@ async def doze_loop() -> None:
             continue
         awake = now < awake_until
         if was_awake and not awake:
-            print(f"({personality.name()} dozed off — say \"{_wake_hint()}\" to wake {personality.pronoun(1)})")
+            print(f"({personality.name()} dozed off — say \"{_wake_hint()}\" to wake it)")
             await set_asleep(True)
             await set_head_held(False)  # idle life resumes; the head may wander again
         was_awake = awake
@@ -2163,7 +2229,7 @@ async def main() -> None:
     brain = RobotBrain(ABILITIES)
     brain.situation = situation
     global body, dancer
-    brain.memory = memories.prompt
+    brain.memory = lambda: memories.prompt(char_id=personality.CHARACTER.id)
     print(f"long-term memory: {len(memories.facts())} facts in {config.MEMORY_FILE}")
     print("web search:", "on (Anthropic, ~1 cent a question)" if searcher is not None else
           "off (needs Anthropic as LLM_BASE_URL and the anthropic package)")

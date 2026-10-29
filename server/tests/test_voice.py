@@ -2,6 +2,7 @@
 itself is optional and isn't needed to run these."""
 
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from brain import config, mouth
@@ -32,6 +33,9 @@ class PiperVoiceTests(unittest.TestCase):
         self.assertRegex(config.PIPER_REVISION, r"^[0-9a-f]{40}$")
         for key, v in config.PIPER_VOICES.items():
             self.assertEqual(len(key.split("-")), 3, f"{key}: expected lang-name-quality")
+            if "path" in v:  # a local voice (config.PIPER_LOCAL_DIR)
+                self.assertTrue(Path(v["path"] + ".json").is_file(), key)
+                continue
             self.assertEqual(set(v["sha256"]), {".onnx", ".onnx.json"}, key)
             for h in v["sha256"].values():
                 self.assertRegex(h, r"^[0-9a-f]{64}$", key)

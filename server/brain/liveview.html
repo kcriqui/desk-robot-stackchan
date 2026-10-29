@@ -147,6 +147,20 @@
   .mems li.empty { display: block; color: var(--muted); }
   .mems .when { font: 11px var(--mono); color: var(--muted); }
   .mems button { padding: 3px 9px; }
+  .mems .btns { display: flex; gap: 6px; }
+  .mems li.group { display: block; border-bottom: 0; padding: 14px 0 2px; font: 11px var(--mono); letter-spacing: .08em;
+                   text-transform: uppercase; color: var(--amber); }
+  .mems li.editing { display: block; }
+  .memedit { display: grid; gap: 8px; }
+  .memedit label { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+  .memedit input[type=date] { font: 13px var(--body); color: var(--ink); background: #090c13; border: 1px solid var(--line-strong);
+                              border-radius: 4px; padding: 6px 8px; color-scheme: dark; }
+  .memedit input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--amber); }
+  .memedit label input[type=text] { width: 140px; flex: none; min-width: 0; }
+  .aboutpick { display: flex; gap: 6px; }
+  .aboutpick input[type=text] { flex: none; width: 120px; min-width: 0; }
+  #memform select, .memedit select { font: 13px var(--body); color: var(--ink); background: #090c13;
+                                     border: 1px solid var(--line-strong); border-radius: 4px; padding: 7px 8px; }
   @media (max-width: 560px) { .mems li { grid-template-columns: minmax(0, 1fr) auto; } .mems .when { grid-column: 1; grid-row: 2; } }
   /* ── tabs (from cgro00's V2 dashboard) ────────────────────────────────── */
   [role=tabpanel][hidden] { display: none; }
@@ -399,9 +413,11 @@
       <ul class="mems" id="mems"></ul>
       <form class="row" id="memform">
         <input type="text" id="memtext" placeholder="A fact for {name} to keep…" maxlength="200" autocomplete="off">
+        <span id="memaboutbox"></span>
+        <select id="memkeep" aria-label="known by"></select>
         <button type="submit">Remember</button>
       </form>
-      <p class="hint">Kept for good in server/data/memories.json and given to <span data-pron="1">him</span> in every conversation. You can also ask <span data-pron="1">him</span> to remember or forget things.</p>
+      <p class="hint">Kept in server/data/memories.json and given to every personality in every conversation, grouped by whom they're about (“everyone”: all humans, the household). “Known by” keeps one to a single personality. You can also ask <span data-pron="1">him</span> to remember or forget things.</p>
     </section>
   </div>
 
@@ -545,7 +561,11 @@
   $("trackbtn").onclick = () => act("track", { on: !status.tracking_enabled });
   $("sayform").onsubmit = ev => { ev.preventDefault(); const t = $("saytext").value.trim(); if (t) { act("say", { text: t }, "Saying it"); $("saytext").value = ""; } };
   document.querySelector('[data-act=ask]').onclick = () => { const t = $("saytext").value.trim(); if (t) { act("ask", { text: t }, "Asked " + NAME); $("saytext").value = ""; } };
-  $("memform").onsubmit = ev => { ev.preventDefault(); const t = $("memtext").value.trim(); if (t) { act("remember", { text: t }, "Remembered"); $("memtext").value = ""; } };
+  $("memform").onsubmit = ev => {
+    ev.preventDefault();
+    const t = $("memtext").value.trim(), k = $("memkeep").value;
+    if (t) { act("remember", { text: t, about: $("memaboutbox").value(), ...(k && { keep_to: k }) }, "Remembered"); $("memtext").value = ""; }
+  };
   document.querySelector('[data-act=dance]').onclick = () => act("dance", {}, NAME + " is dancing");
   document.querySelector('[data-act=wake]').onclick = () => act("sleep", { on: false }, NAME + " is awake");
   document.querySelector('[data-act=sleep]').onclick = () => act("sleep", { on: true }, NAME + " is asleep");
@@ -576,28 +596,102 @@
   function fmt(x, t) { return (t.step >= 1 ? Math.round(x) : x.toFixed(t.step < 0.1 ? 2 : 1)) + (t.unit || ""); }
 
   // ── long-term memory ───────────────────────────────────────────────────
-  let memShown = null;
-  function showMemories(list) {
-    const key = JSON.stringify(list || []);
-    if (key === memShown) return;   // redraw only on a change, not every tick
+  // Grouped by whom each fact is about; every personality shares them, except those marked only theirs.
+  let memShown = null, memEditing = null, memPeople = [], charNames = {}, lastMems = [];
+  queueMicrotask(() => aboutPicker($("memaboutbox"), ""));   // once the whole script has run
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;   // textContent throughout: facts come from speech
+    return e;
+  }
+  function showMemories(list, people) {
+    if (people && JSON.stringify(people) !== JSON.stringify(memPeople)) {   // only on a change: a rebuild closes an open list
+      const first = !memPeople.length;
+      memPeople = people;
+      aboutPicker($("memaboutbox"), first ? people[0] || "" : $("memaboutbox").value());   // the owner to begin with
+    }
+    const keepNow = $("memkeep").value;
+    if ($("memkeep").options.length !== Object.keys(charNames).length + 1) knownBy(keepNow, $("memkeep"));
+    const key = JSON.stringify([list || [], memPeople, charNames]);
+    if (key === memShown || memEditing !== null) return;   // redraw only on a change, and never mid-edit
     memShown = key;
     const ul = $("mems"); ul.replaceChildren();
     $("memnote").textContent = list && list.length ? list.length + (list.length === 1 ? " fact" : " facts") : "";
     if (!list || !list.length) {
-      const li = document.createElement("li"); li.className = "empty";
-      li.textContent = "Nothing yet. Tell " + P(1) + " something worth keeping, or add it here.";
+      const li = el("li", "empty", "Nothing yet. Tell " + P(1) + " something worth keeping, or add it here.");
       ul.appendChild(li); return;
     }
-    for (const m of list) {   // textContent throughout: facts come from speech
-      const li = document.createElement("li");
-      const text = document.createElement("span"); text.textContent = m.text;
-      const when = document.createElement("span"); when.className = "when";
-      when.textContent = m.added + (m.until ? " → " + m.until : "");
-      const b = document.createElement("button"); b.className = "astro"; b.textContent = "Forget";
-      b.setAttribute("aria-label", "Forget: " + m.text);
-      b.onclick = () => act("forget", { id: m.id }, "Forgotten");
-      li.append(text, when, b); ul.appendChild(li);
+    const groups = new Map();
+    for (const m of list) { if (!groups.has(m.about)) groups.set(m.about, []); groups.get(m.about).push(m); }
+    const order = [...groups.keys()].sort((a, b) => (a === "") - (b === "") || memPeople.indexOf(a) - memPeople.indexOf(b) || a.localeCompare(b));
+    for (const about of order) {
+      ul.appendChild(el("li", "group", about ? "About " + about : "About everyone"));
+      for (const m of groups.get(about)) ul.appendChild(memRow(m));
     }
+  }
+  function memRow(m) {
+    const li = el("li");
+    const by = m.by ? (charNames[m.by] || m.by) : "";
+    const meta = [m.added + (m.until ? " → " + m.until : ""), by && "learned by " + by, m.only && "only " + by].filter(Boolean).join(" · ");
+    const edit = el("button", "", "Edit"); edit.setAttribute("aria-label", "Edit: " + m.text);
+    edit.onclick = () => { memEditing = m.id; li.replaceWith(memForm(m)); };
+    const forget = el("button", "astro", "Forget"); forget.setAttribute("aria-label", "Forget: " + m.text);
+    forget.onclick = () => act("forget", { id: m.id }, "Forgotten");
+    const btns = el("span", "btns"); btns.append(edit, forget);
+    li.append(el("span", "", m.text), el("span", "when", meta), btns);
+    return li;
+  }
+  // Whom a fact is about: everyone, someone it knows, or someone new (a name box appears). box.value() reads it.
+  function aboutPicker(box, value) {
+    box = box || el("span");
+    box.className = "aboutpick";
+    const sel = el("select"), name = el("input");
+    sel.setAttribute("aria-label", "about whom");
+    name.type = "text"; name.placeholder = "their name"; name.maxLength = 40; name.setAttribute("aria-label", "their name");
+    const opts = [["", "everyone"], ...memPeople.map(n => [n, n]), ["\n", "someone new…"]];
+    sel.replaceChildren(...opts.map(([v, t]) => { const o = el("option", "", t); o.value = v; return o; }));
+    const known = value === "" || memPeople.includes(value);
+    sel.value = known ? value : "\n";
+    name.value = known ? "" : value;
+    name.hidden = known;
+    sel.onchange = () => { name.hidden = sel.value !== "\n"; if (!name.hidden) name.focus(); };
+    box.replaceChildren(sel, name);
+    box.value = () => sel.value === "\n" ? name.value.trim() : sel.value;   // "" = everyone
+    return box;
+  }
+  function knownBy(value, select) {   // which personalities know a fact: all of them, or one
+    select = select || el("select");
+    const opts = [["", "all personalities"], ...Object.entries(charNames).map(([id, name]) => [id, name + " only"])];
+    if (value && !charNames[value]) opts.push([value, value + " only"]);
+    select.replaceChildren(...opts.map(([v, t]) => { const o = el("option", "", t); o.value = v; return o; }));
+    select.value = value;
+    return select;
+  }
+  function memForm(m) {
+    const li = el("li", "editing");
+    const f = el("form", "memedit");
+    const text = el("input"); text.type = "text"; text.value = m.text; text.maxLength = 200; text.setAttribute("aria-label", "the fact");
+    const about = aboutPicker(null, m.about);
+    const until = el("input"); until.type = "date"; until.value = m.until || ""; until.setAttribute("aria-label", "true until (empty: for good)");
+    const lab = (txt, input) => { const l = el("label"); l.append(el("span", "", txt), input); return l; };
+    const row = el("div", "row");
+    row.append(lab("About", about), lab("Until", until));
+    const keep = knownBy(m.only ? m.by : "");
+    row.append(lab("Known by", keep));
+    const save = el("button", "", "Save"); save.type = "submit";
+    const cancel = el("button", "", "Cancel"); cancel.type = "button";
+    const done = () => { memEditing = null; memShown = null; showMemories(lastMems); };
+    cancel.onclick = done;
+    f.onsubmit = async ev => {
+      ev.preventDefault();
+      const body = { id: m.id, text: text.value.trim(), about: about.value(), until: until.value, keep_to: keep.value };
+      try { await api("edit_memory", body); toast("Saved"); done(); } catch (e) { toast(e.message, true); }
+    };
+    row.append(save, cancel);
+    f.append(text, row); li.append(f);
+    setTimeout(() => text.focus());
+    return li;
   }
 
   // ── the hearing strip ──────────────────────────────────────────────────
@@ -1129,7 +1223,9 @@
       drawWave();
       showSliders(TUNES, s.tuning);
       showSliders(VOICE, s.voice);
-      showMemories(s.memories);
+      for (const c of s.characters || []) charNames[c.id] = c.name;
+      lastMems = s.memories;
+      showMemories(s.memories, s.people);
     } catch (e) {
       $("link").textContent = "server?"; $("linkdot").className = "dot";
     }

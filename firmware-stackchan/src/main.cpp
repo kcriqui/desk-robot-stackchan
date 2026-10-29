@@ -216,10 +216,12 @@ void saveScreen() {
 IdleGames games(gfx);
 extern float batteryVolts, batteryMa;  // (below) the body's INA226
 
-// The charge from the resting voltage (the brain's battery.py curve, for one Li-ion cell).
-int batteryPercent(float v) {
-  static const float V[] = {3.30f, 3.50f, 3.61f, 3.69f, 3.74f, 3.77f, 3.80f, 3.84f, 3.90f, 3.96f, 4.05f, 4.15f};
-  static const int P[] = {0, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
+// The charge left: the brain's battery.py, measured on this battery (run to empty 2026-10-28) at ~240 mA. The
+// voltage is first moved to that draw (0.4 ohm inside): charging reads high, resting a little high. Keep both in step.
+int batteryPercent(float v, float ma) {
+  static const float V[] = {3.30f, 3.45f, 3.55f, 3.60f, 3.65f, 3.69f, 3.73f, 3.76f, 3.87f, 3.95f, 4.02f, 4.06f};
+  static const int P[] = {0, 4, 11, 18, 33, 46, 54, 65, 76, 87, 95, 100};
+  v += (ma - 240.0f) / 1000.0f * 0.40f;
   if (v <= V[0]) return 0;
   for (int i = 1; i < 12; ++i)
     if (v <= V[i]) return lroundf(P[i - 1] + (P[i] - P[i - 1]) * (v - V[i - 1]) / (V[i] - V[i - 1]));
@@ -234,7 +236,8 @@ void updateStatus() {
     bars = r > -55 ? 4 : r > -65 ? 3 : r > -75 ? 2 : r > -85 ? 1 : 0;
   }
   uint8_t power = batteryMa > ON_BATTERY_MA ? 0 : batteryMa < -ON_BATTERY_MA ? 1 : 2;
-  clockScreen.setStatus(bars, batteryVolts > 0 ? batteryPercent(batteryVolts) : -1, batteryVolts > 0 ? power : 255);
+  clockScreen.setStatus(bars, batteryVolts > 0 ? batteryPercent(batteryVolts, batteryMa) : -1,
+                        batteryVolts > 0 ? power : 255);
 }
 
 // Roam: while it sleeps by day, the head looks round the room every few seconds, slowly, with the sleeping face
@@ -905,7 +908,7 @@ void setup() {
   face.setIdle(true);
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.13 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.15 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN

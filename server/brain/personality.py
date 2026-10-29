@@ -264,6 +264,8 @@ Remembering (your long-term memory):
 names of people and pets, likes and dislikes, health, important dates, what they are building. Say briefly \
 that you will remember. Not small talk, not things that only matter today, and not passing moods or private \
 worries unless {{human}} asks you to remember them.
+- Each fact is about one person (by name), or about everyone. When you know who is talking (their voice), \
+their facts are the ones about them; a fact about someone else is about that person, not the speaker.
 - Never remember passwords, PINs, or card or account numbers, even if asked.
 - When a fact changes, `forget` the old one, then `remember` the new one. When asked to forget something, do \
 it, and say so.
@@ -347,6 +349,7 @@ def _path(char_id: str) -> Path:
 VOICE_RANGES = {"pitch": (-12, 12), "intonation": (0, 2), "speed": (0.5, 2), "noise": (0, 1.5),
                 "noise_w": (0, 1.5), "pause": (0, 2)}
 PITCH_MODES = ("resample", "keep_size")
+LOCAL_VOICE = re.compile(r"[a-z]{2,3}_[A-Z]{2}-[A-Za-z0-9_]+-(x_low|low|medium|high)")  # a Piper voice's file name
 
 
 def _fields(text: str) -> set[str]:
@@ -406,10 +409,12 @@ def parse(char_id: str, d) -> Character:
         raise ValueError(f"{char_id}: max_sentences is a whole number from 1 to 12 (0 = the usual)")
     voice = dict(d.get("voice", {}))
     if voice:
-        if voice.get("piper") not in config.PIPER_VOICES:
+        here = voice.get("piper") in config.PIPER_VOICES
+        # a local voice (config.PIPER_LOCAL_DIR) may be missing on this computer: voice() stands in for it
+        if not here and not LOCAL_VOICE.fullmatch(str(voice.get("piper"))):
             raise ValueError(f"{char_id}: voice.piper must be one of {', '.join(config.PIPER_VOICES)} (config.py)")
         for k, v in voice.items():
-            if k == "piper" or (k in ("noise", "noise_w") and v is None):
+            if k == "piper" or (k in ("noise", "noise_w") and v is None) or (k == "speaker" and not here):
                 continue
             if k == "speaker":
                 speakers = config.PIPER_VOICES[voice["piper"]].get("speakers", [])
@@ -624,6 +629,8 @@ def voice(c: Character | None = None) -> tuple[str, dict]:
     character's on top."""
     v = (c or CHARACTER).voice
     key = v.get("piper") or config.PIPER_VOICE
+    if key not in config.PIPER_VOICES:  # a local voice that isn't on this computer: its tuning doesn't fit another
+        return config.PIPER_VOICE, dict(config.PIPER_VOICES[config.PIPER_VOICE])
     tune = {**config.PIPER_VOICES[key], **{k: x for k, x in v.items() if k != "piper"}}
     return key, tune
 

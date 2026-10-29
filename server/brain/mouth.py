@@ -292,13 +292,17 @@ _piper_lock = threading.Lock()  # one synthesis at a time; also guards loading
 
 def _piper_voice(key: str):
     """A Piper voice from config.PIPER_VOICES, downloaded once (pinned and
-    hash-checked like the turn-taking models) and loaded once."""
+    hash-checked like the turn-taking models) and loaded once. A local one
+    (config.PIPER_LOCAL_DIR) loads from its file."""
     with _piper_lock:
         if key not in _pipers:
             from piper import PiperVoice  # optional, GPL-3.0; slow import, keep it lazy
 
             from .turn import _fetch
 
+            if path := config.PIPER_VOICES[key].get("path"):
+                _pipers[key] = PiperVoice.load(path, config_path=path + ".json")
+                return _pipers[key]
             lang, name, quality = key.split("-")
             base = config.PIPER_VOICES[key].get("url") or (
                 f"https://huggingface.co/rhasspy/piper-voices/resolve/{config.PIPER_REVISION}/"

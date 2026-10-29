@@ -120,6 +120,54 @@ class MemoriesTests(unittest.TestCase):
         self.assertEqual(len(Memories(self.path).facts(DAY)), 1)
 
 
+class PeopleAndPersonalitiesTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.path = Path(self.dir.name) / "memories.json"
+        self.m = Memories(self.path, owner="Kevin")
+
+    def test_facts_are_about_someone(self):
+        self.assertEqual(self.m.add("likes purple", today=DAY)[0].about, "Kevin")       # nobody said: the owner
+        self.assertEqual(self.m.add("likes tea", today=DAY, about="Regina")[0].about, "Regina")
+        self.assertEqual(self.m.add("the wifi is slow", today=DAY, about="everyone")[0].about, "")
+        _, new = self.m.add("likes purple", today=DAY, about="Regina")                   # same words, someone else
+        self.assertTrue(new)
+        self.assertEqual(self.m.people(), ["Kevin", "Regina"])
+        p = self.m.prompt(DAY)
+        self.assertLess(p.index("About Kevin:"), p.index("About Regina:"))
+        self.assertLess(p.index("About Regina:"), p.index("About everyone"))
+
+    def test_old_facts_are_about_the_owner(self):
+        self.path.write_text(json.dumps({"facts": [{"id": 1, "text": "likes purple", "added": "2026-10-22"}]}))
+        self.assertEqual(Memories(self.path, owner="Kevin").facts(DAY)[0].about, "Kevin")
+
+    def test_shared_unless_kept_to_one_personality(self):
+        self.m.add("the robot's name for the cat is Captain", today=DAY, by="stackchan")
+        self.m.add("owes Kevin a dance", today=DAY, by="stackchan", only=True)
+        self.assertNotIn("owes Kevin", self.m.prompt(DAY, char_id="rocky"))
+        self.assertIn("Captain", self.m.prompt(DAY, char_id="rocky"))
+        self.assertIn("owes Kevin", self.m.prompt(DAY, char_id="stackchan"))
+        self.assertFalse(self.m.add("by hand", today=DAY, only=True)[0].only)  # no personality to keep it to
+
+    def test_edit(self):
+        f, _ = self.m.add("likes tee", today=DAY, by="rocky")
+        f = self.m.edit(f.id, text="likes tea", about="Regina", until="2026-12-31", keep_to="rocky")
+        self.assertEqual((f.text, f.about, f.until, f.only), ("likes tea", "Regina", "2026-12-31", True))
+        self.assertEqual(Memories(self.path, owner="Kevin").facts(DAY)[0].about, "Regina")   # saved
+        self.assertEqual(self.m.edit(f.id, until="").until, "")
+        self.assertFalse(self.m.edit(f.id, keep_to="").only)                    # all personalities again
+        g, _ = self.m.add("Rocky calls the cat Captain", today=DAY)              # added by hand...
+        g = self.m.edit(g.id, keep_to="glados")                                  # ...kept to one personality
+        self.assertEqual((g.by, g.only), ("glados", True))
+        self.assertNotIn("Captain", self.m.prompt(DAY, char_id="rocky"))
+        for bad in ({"text": "the card number is 1234"}, {"text": " "}, {"until": "soon"}):
+            with self.assertRaises(ValueError, msg=bad):
+                self.m.edit(f.id, **bad)
+        with self.assertRaises(ValueError):
+            self.m.edit(99, text="nope")
+
+
 class MemoryWiringTests(unittest.TestCase):
     def test_tools_and_prompt_know_about_memory(self):
         names = {t["function"]["name"] for t in thinking.TOOLS}

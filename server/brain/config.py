@@ -197,6 +197,13 @@ PIPER_VOICES = {
         },
     },
 }
+# Voices of your own (trained with piper1-gpl, say), personal ones included: <lang>-<name>-<quality>.onnx and its
+# .onnx.json in PIPER_LOCAL_DIR (server/data/voices, not in git). Each joins PIPER_VOICES under its file name,
+# untuned (a character tunes it). A character whose voice isn't on this computer speaks in PIPER_VOICE.
+PIPER_LOCAL_DIR = Path(os.environ.get("PIPER_LOCAL_DIR") or Path(__file__).resolve().parent.parent / "data" / "voices")
+for _f in sorted(PIPER_LOCAL_DIR.glob("*-*-*.onnx")):
+    if _f.with_name(_f.name + ".json").is_file():
+        PIPER_VOICES.setdefault(_f.stem, {"pitch": 0.0, "speed": 1.0, "noise": None, "noise_w": None, "path": str(_f)})
 PIPER_VOICE = os.environ.get("PIPER_VOICE", "en_US-ryan-medium").strip()
 if PIPER_VOICE not in PIPER_VOICES:
     raise SystemExit(f"PIPER_VOICE={PIPER_VOICE!r} in server/.env: use one of {', '.join(PIPER_VOICES)}")
@@ -521,3 +528,10 @@ LED_ASLEEP = "off"         # off | glow
 TIMER_FILE = Path(os.environ.get("TIMER_FILE") or Path(__file__).resolve().parent.parent / "data" / "timers.json")
 TIMER_MISSED_SECONDS = 90  # rung this late (the robot was off, or the brain down): said as missed, with the time
 MEMORY_FILE = Path(os.environ.get("MEMORY_FILE") or Path(__file__).resolve().parent.parent / "data" / "memories.json")
+# Recognising people by voice (speakers.py): the voices learned, and how alike a turn must be to one (cosine
+# similarity, the average voice taken away). Measured through the robot's mic: the owner ~0.8, others ~0.2.
+SPEAKERS_FILE = Path(os.environ.get("SPEAKERS_FILE") or Path(__file__).resolve().parent.parent / "data" / "speakers.json")
+VOICE_SURE = 0.6          # this alike (and VOICE_MARGIN ahead of the next voice): it's them
+VOICE_MAYBE = 0.45        # this alike: probably them
+VOICE_MARGIN = 0.1
+LEARN_VOICE_SECONDS = 40  # of a person's speech to learn their voice in an interview

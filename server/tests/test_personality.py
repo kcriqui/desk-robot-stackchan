@@ -98,12 +98,18 @@ class CharacterFileTests(unittest.TestCase):
         self.assertEqual(personality.name(), config.ROBOT_NAME)          # and by his own again
 
     def test_bad_characters_are_refused(self):
-        self.write("novoice", voice={"piper": "en_US-nobody-medium"})
+        self.write("novoice", voice={"piper": "nobody"})
         self.write("noexamples", examples=["no emotion tag"])
         for cid in ("novoice", "noexamples", "missing", "../etc"):
             with self.assertRaises(ValueError, msg=cid):
                 personality.load(cid)
         self.assertEqual([c.id for c in personality.available()], ["rocky"])   # broken ones are skipped
+
+    def test_a_local_voice_missing_here_stands_in_as_the_default(self):
+        self.write("unit", voice={"piper": "en_US-nobody-medium", "pitch": 3, "speaker": "x"})
+        key, tune = personality.voice(personality.load("unit"))
+        self.assertEqual(key, config.PIPER_VOICE)
+        self.assertEqual(tune, config.PIPER_VOICES[config.PIPER_VOICE])   # without the missing voice's tuning
 
     def test_every_line_of_every_kind_fills_in(self):
         self.write("unit")
