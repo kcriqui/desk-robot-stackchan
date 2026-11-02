@@ -1,20 +1,33 @@
 #include "link.h"
 
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include <WiFi.h>
+#include <algorithm>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "0.6.10.15";
+static const char* FW_VERSION = "0.6.10.16";
+
+static const size_t MAX_NETWORKS = 8;
+static const uint32_t JOIN_MS = 15000;           // give up on a network after this long
+static const uint32_t REJOIN_MS = 20000;         // after a drop, how long the WiFi stack gets to rejoin by itself
+static const uint32_t RESCAN_MS = 3000;          // nothing to join: look again (a hotspot just turned on)
+static const uint16_t FINDER_PORT = 8767;        // server/brain/finder.py
+static const uint32_t ASK_MS = 3000;             // how often to ask for a brain while there's none
+static const uint32_t BRAIN_PATIENCE_MS = 12000;  // an address that fails this long gives way to a brain that answered
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
                  StateHandler onState) {
-  ssid_ = ssid;
-  pass_ = pass;
+  home_ = ssid;
+  homeBrain_ = host;
+  brainPort_ = port;
   token_ = token;
   onCommand_ = std::move(onCommand);
   onState_ = std::move(onState);
 
+  loadNetworks(ssid, pass);
+  WiFi.persistent(false);  // the list above is the only copy; don't wear the flash on every join
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);  // lower latency; main.cpp turns power saving on in deep sleep
   // Hear every channel before joining, then pick the strongest access point
@@ -22,42 +35,278 @@ void Link::begin(const char* ssid, const char* pass, const char* host,
   // mesh or a second router can be a far one. (From the original V2.)
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
-  WiFi.begin(ssid_, pass_);
-  Serial.printf("wifi: joining \"%s\"...\n", ssid_);
 
-  ws_.begin(host, port, "/");
   ws_.onEvent([this](WStype_t type, uint8_t* payload, size_t length) {
     onEvent(type, payload, length);
   });
+  startScan(millis());
+}
+
+void Link::loadNetworks(const char* homeSsid, const char* homePass) {
+  Preferences p;
+  p.begin("wifi", true);
+  String saved = p.getString("list", "[]");
+  last_ = p.getString("last", homeSsid);
+  p.end();
+  networks_.push_back({homeSsid, homePass});
+  JsonDocument doc;
+  if (!deserializeJson(doc, saved)) {
+    for (JsonObject n : doc.as<JsonArray>()) {
+      String ssid = n["s"] | "";
+      if (!ssid.isEmpty() && !knows(ssid) && networks_.size() < MAX_NETWORKS) {
+        networks_.push_back({ssid, String(n["p"] | "")});
+      }
+    }
+  }
+}
+
+// Everything but the first: that one comes from secrets.h.
+void Link::saveNetworks() const {
+  JsonDocument doc;
+  JsonArray list = doc.to<JsonArray>();
+  for (size_t i = 1; i < networks_.size(); ++i) {
+    JsonObject n = list.add<JsonObject>();
+    n["s"] = networks_[i].ssid;
+    n["p"] = networks_[i].pass;
+  }
+  String out;
+  serializeJson(doc, out);
+  Preferences p;
+  p.begin("wifi", false);
+  p.putString("list", out);
+  p.putString("last", last_);
+  p.end();
+}
+
+bool Link::knows(const String& ssid) const {
+  for (const Network& n : networks_) {
+    if (n.ssid == ssid) return true;
+  }
+  return false;
+}
+
+void Link::startScan(uint32_t nowMs) {
+  if (scanning_) return;
+  scanning_ = WiFi.scanNetworks(true) == WIFI_SCAN_RUNNING;
+  if (!scanning_) nextScanMs_ = nowMs + RESCAN_MS;  // the radio is busy: again in a moment
+}
+
+void Link::onScanDone(int found, uint32_t nowMs, bool wifiUp) {
+  std::vector<Seen> seen;
+  for (int i = 0; i < found; ++i) {
+    String ssid = WiFi.SSID(i);
+    if (ssid.isEmpty()) continue;
+    auto same = std::find_if(seen.begin(), seen.end(), [&](const Seen& s) { return s.ssid == ssid; });
+    int rssi = WiFi.RSSI(i);
+    if (same == seen.end()) seen.push_back({ssid, rssi, WiFi.encryptionType(i) == WIFI_AUTH_OPEN});
+    else same->rssi = max(same->rssi, rssi);  // a mesh: the same name more than once
+  }
+  WiFi.scanDelete();
+  std::sort(seen.begin(), seen.end(), [](const Seen& a, const Seen& b) { return a.rssi > b.rssi; });
+  if (scanWanted_) {
+    scanWanted_ = false;
+    seen_ = seen;
+    if (seen_.size() > 20) seen_.resize(20);
+    sendWifi();
+  }
+  if (wifiUp) return;
+
+  // The last one used first, so a choice made in the live view sticks while that network is there; then by signal.
+  toTry_.clear();
+  for (const Seen& s : seen) {
+    if (knows(s.ssid) && s.ssid != last_) toTry_.push_back(s.ssid);
+  }
+  bool lastInSight = std::any_of(seen.begin(), seen.end(), [&](const Seen& s) { return s.ssid == last_; });
+  if (lastInSight && knows(last_)) toTry_.insert(toTry_.begin(), last_);
+  if (toTry_.empty() && knows(last_)) {
+    tryLastBlind_ = !tryLastBlind_;
+    if (tryLastBlind_) toTry_.push_back(last_);  // a hidden network never shows in a scan
+  }
+  if (toTry_.empty()) Serial.printf("wifi: no known network in sight (%d seen)\n", static_cast<int>(seen.size()));
+  joinNext(nowMs);
+}
+
+void Link::joinNext(uint32_t nowMs) {
+  joining_ = false;
+  if (toTry_.empty()) {
+    nextScanMs_ = nowMs + RESCAN_MS;
+    return;
+  }
+  String ssid = toTry_.front();
+  toTry_.erase(toTry_.begin());
+  for (const Network& n : networks_) {
+    if (n.ssid != ssid) continue;
+    Serial.printf("wifi: joining \"%s\"...\n", ssid.c_str());
+    WiFi.begin(ssid.c_str(), n.pass.isEmpty() ? nullptr : n.pass.c_str());
+    joining_ = true;
+    joinAtMs_ = nowMs;
+    return;
+  }
+  joinNext(nowMs);  // forgotten since the scan
+}
+
+void Link::onJoined(uint32_t nowMs) {
+  joining_ = false;
+  toTry_.clear();
+  String ssid = WiFi.SSID();
+  Serial.printf("wifi: connected to \"%s\", ip %s\n", ssid.c_str(), WiFi.localIP().toString().c_str());
+  if (ssid != last_) {
+    last_ = ssid;
+    saveNetworks();
+  }
+  finder_.stop();
+  finder_.begin(FINDER_PORT);
+  nextAskMs_ = nowMs;
+  if (ssid == here_) return;  // back on the same network: the link picks up by itself
+  here_ = ssid;
+  startBrain(ssid == home_ ? homeBrain_ : String(), brainPort_, nowMs);
+}
+
+void Link::startBrain(const String& host, uint16_t port, uint32_t nowMs) {
+  if (brainStarted_) ws_.disconnect();
+  brainHost_ = host;
+  brainPort_ = port;
+  brainSinceMs_ = nowMs;
+  brainStarted_ = !host.isEmpty();
+  if (!brainStarted_) return;
+  Serial.printf("brain: trying %s:%u\n", host.c_str(), port);
+  ws_.begin(brainHost_.c_str(), brainPort_, "/");
   ws_.setReconnectInterval(3000);
   ws_.enableHeartbeat(15000, 3000, 2);  // ping every 15 s, drop after 2 misses
 }
 
+// With no brain: ask the network, and take an answer if there's no address yet or the one we have isn't working.
+void Link::findBrain(uint32_t nowMs) {
+  for (int size = finder_.parsePacket(); size > 0; size = finder_.parsePacket()) {
+    char reply[32] = {};
+    finder_.read(reply, sizeof reply - 1);
+    int port = 0;
+    if (sscanf(reply, "rockybrain! %d", &port) != 1 || port <= 0 || port > 65535) continue;
+    String from = finder_.remoteIP().toString();
+    if (from != brainHost_ && (brainHost_.isEmpty() || static_cast<int32_t>(nowMs - brainSinceMs_) >= static_cast<int32_t>(BRAIN_PATIENCE_MS))) {
+      Serial.printf("brain: found one at %s\n", from.c_str());
+      startBrain(from, port, nowMs);
+    }
+  }
+  if (static_cast<int32_t>(nowMs - nextAskMs_) >= 0) {
+    nextAskMs_ = nowMs + ASK_MS;
+    finder_.beginPacket(WiFi.broadcastIP(), FINDER_PORT);
+    finder_.print("rockybrain?");
+    finder_.endPacket();
+  }
+}
+
+// The live view's picture of the WiFi. No passwords.
+void Link::sendWifi() {
+  JsonDocument doc;
+  doc["type"] = "wifi";
+  doc["now"] = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String();
+  doc["rssi"] = WiFi.RSSI();
+  doc["ip"] = WiFi.localIP().toString();
+  JsonArray known = doc["known"].to<JsonArray>();
+  for (const Network& n : networks_) {
+    JsonObject o = known.add<JsonObject>();
+    o["ssid"] = n.ssid;
+    o["home"] = n.ssid == home_;
+  }
+  JsonArray seen = doc["seen"].to<JsonArray>();
+  for (const Seen& s : seen_) {
+    JsonObject o = seen.add<JsonObject>();
+    o["ssid"] = s.ssid;
+    o["rssi"] = s.rssi;
+    o["open"] = s.open;
+  }
+  String out;
+  serializeJson(doc, out);
+  sendJson(out);
+}
+
+void Link::printWifi() const {
+  Serial.printf("wifi: %s, ip %s, %d dBm, brain %s\n",
+                WiFi.status() == WL_CONNECTED ? WiFi.SSID().c_str() : "not connected",
+                WiFi.localIP().toString().c_str(), static_cast<int>(WiFi.RSSI()),
+                brainHost_.isEmpty() ? "not found yet" : brainHost_.c_str());
+  for (const Network& n : networks_) Serial.printf("  knows \"%s\"\n", n.ssid.c_str());
+}
+
+// wifi_add's password goes no further than the list: not to the console, not back to the brain.
+bool Link::handleWifiMessage(const char* type, JsonDocument& doc, uint32_t nowMs) {
+  if (strncmp(type, "wifi_", 5) != 0) return false;
+  String ssid = doc["ssid"] | "";
+  if (!strcmp(type, "wifi_scan")) {
+    scanWanted_ = true;
+    startScan(nowMs);  // already scanning: that one reports
+    return true;
+  }
+  if (!strcmp(type, "wifi_add") && !ssid.isEmpty()) {
+    String pass = doc["password"] | "";
+    auto n = std::find_if(networks_.begin(), networks_.end(), [&](const Network& x) { return x.ssid == ssid; });
+    if (n != networks_.end() && n != networks_.begin()) {
+      n->pass = pass;
+    } else if (n == networks_.end() && networks_.size() < MAX_NETWORKS) {
+      networks_.push_back({ssid, pass});
+    } else {
+      sendNote(n == networks_.end() ? "wifi: already knows 8 networks, forget one first"
+                                    : "wifi: that network's password is in secrets.h");
+    }
+    saveNetworks();
+  } else if (!strcmp(type, "wifi_forget") && !ssid.isEmpty()) {
+    auto n = std::find_if(networks_.begin() + 1, networks_.end(), [&](const Network& x) { return x.ssid == ssid; });
+    if (n != networks_.end()) networks_.erase(n);
+    if (last_ == ssid) last_ = home_;
+    saveNetworks();
+  } else if (!strcmp(type, "wifi_use") && knows(ssid)) {
+    last_ = ssid;
+    saveNetworks();
+    switchWanted_ = true;  // from update(), not from inside the socket's own callback
+  }
+  sendWifi();
+  return true;
+}
+
 void Link::update(uint32_t nowMs) {
+  if (switchWanted_) {
+    switchWanted_ = false;
+    Serial.printf("wifi: asked to use \"%s\"\n", last_.c_str());
+    switching_ = true;
+    WiFi.disconnect();
+    joining_ = false;
+    toTry_.clear();
+  }
   bool wifiUp = WiFi.status() == WL_CONNECTED;
+  if (scanning_) {
+    int found = WiFi.scanComplete();
+    if (found != WIFI_SCAN_RUNNING) {
+      scanning_ = false;
+      onScanDone(found, nowMs, wifiUp);
+    }
+  }
   if (wifiUp && !wifiReported_) {
-    Serial.printf("wifi: connected, ip %s\n", WiFi.localIP().toString().c_str());
     wifiReported_ = true;
+    onJoined(nowMs);
   } else if (!wifiUp && wifiReported_) {
     Serial.println(F("wifi: lost, retrying"));
     wifiReported_ = false;
-  }
-  if (!wifiUp) {
     // The WiFi stack rejoins by itself after most drops, but not after every
     // failed join (in the original V2 it sat on "joining" for minutes after a
-    // reboot). So if it has been down for a while, start the join over.
-    if (wifiDownSinceMs_ == 0) {
-      wifiDownSinceMs_ = nowMs | 1;
-    } else if (nowMs - wifiDownSinceMs_ > 20000) {
-      Serial.printf("wifi: still not connected (status %d), joining \"%s\" again\n",
-                    static_cast<int>(WiFi.status()), ssid_);
+    // reboot), and it can't move to another network. So if it has been down
+    // for a while, look around and start over.
+    nextScanMs_ = switching_ ? nowMs : nowMs + REJOIN_MS;
+    switching_ = false;
+  }
+  if (!wifiUp) {
+    if (joining_) {
+      if (nowMs - joinAtMs_ >= JOIN_MS) {
+        Serial.printf("wifi: couldn't join (status %d)\n", static_cast<int>(WiFi.status()));
+        WiFi.disconnect();
+        joinNext(nowMs);
+      }
+    } else if (!scanning_ && static_cast<int32_t>(nowMs - nextScanMs_) >= 0) {
       WiFi.disconnect();
-      WiFi.begin(ssid_, pass_);
-      wifiDownSinceMs_ = nowMs | 1;
+      startScan(nowMs);
     }
     return;
   }
-  wifiDownSinceMs_ = 0;
 
   // Transmit power to suit the signal: sending is the radio's biggest draw,
   // and full power is only needed far from the router. 11 dBm while the
@@ -74,6 +323,9 @@ void Link::update(uint32_t nowMs) {
       Serial.printf("wifi: signal %d dBm, transmit power %s\n", rssi, low ? "11 dBm (router close)" : "full");
     }
   }
+
+  if (!connected_) findBrain(nowMs);
+  if (!brainStarted_) return;
 
   // Each ws_.loop() reads at most one message. While a reply streams in (ten
   // audio messages a second, plus heartbeat replies), one read per pass of
@@ -159,6 +411,7 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
       String out;
       serializeJson(doc, out);
       sendJson(out);
+      sendWifi();
       if (onState_) onState_(true);
       break;
     }
@@ -166,6 +419,7 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
       if (connected_) {
         Serial.println(F("brain: disconnected, will retry"));
         if (onState_) onState_(false);
+        brainSinceMs_ = millis();  // it may only be restarting: give it its chance again
       }
       connected_ = false;
       break;
@@ -192,6 +446,7 @@ void Link::handleMessage(const char* json) {
     return;
   }
   const char* type = doc["type"] | "";
+  if (handleWifiMessage(type, doc, millis())) return;
   String cmd;
   if (!strcmp(type, "emotion")) {
     cmd = String("emo ") + (doc["name"] | "neutral");

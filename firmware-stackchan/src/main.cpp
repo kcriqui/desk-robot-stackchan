@@ -424,6 +424,7 @@ void printHelp() {
   Serial.println(F("  miclevel     print mic level for 3 s (talk to it)"));
   Serial.println(F("  stream on|off [fps]  stream camera JPEGs to the brain"));
   Serial.println(F("  snap         grab one frame and report its size"));
+  Serial.println(F("  wifi         the network it's on, the brain's address, the networks it knows"));
   Serial.println(F("  temp         chip temperature"));
   Serial.println(F("  battery      battery voltage and current"));
   Serial.println(F("  power        battery, deep sleep and power-off state"));
@@ -564,6 +565,10 @@ void handleCommand(String line) {
       applyStream();  // back to what the brain wants (and off while asleep)
       Serial.printf("snap: %u bytes (%s); encode time is on the diag line\n", n, n ? "ok" : "no frame");
     }
+#if HAVE_BRAIN
+  } else if (cmd == "wifi") {
+    brainLink.printWifi();
+#endif
   } else if (cmd == "temp") {
     Serial.printf("chip %.1f C\n", temperatureRead());
   } else if (cmd == "battery") {
@@ -908,7 +913,7 @@ void setup() {
   face.setIdle(true);
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.15 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.16 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN

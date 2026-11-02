@@ -104,6 +104,9 @@ you said. Anything else goes to the language model, which can do the same things
   off, and a console.
 - **Personalities**: make, edit, test, import, export and switch them.
 - **Memories**: what it remembers, by person; add, edit and forget.
+- **WiFi** (in Settings): the networks it knows; scan, add, use and forget them. It joins whichever it can see,
+  and finds the brain by itself on any network that lets devices see each other, so it travels: home, a
+  friend's WiFi, a phone's hotspot.
 - **Settings**: your name, awake time, volume, body language, the hand-over-sensor stop, power bank, the
   default personality and face pack, clock and weather, screen brightness and night mode, the idle screen,
   the light bars, wake words and engine, listening thresholds and speaker tone. Changes apply at once and are

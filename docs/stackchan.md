@@ -87,6 +87,16 @@ same folder. Fill in your WiFi, the computer's address, and the same
 `ROBOT_TOKEN`. Then flash again. The serial console shows
 `wifi: connected` and then `brain: connected`.
 
+To take it somewhere else, add the network in the live view (Settings, WiFi)
+while it's still connected. It keeps up to 8 in flash, scans at power-on and
+joins the one used last if it's there, or else the strongest. Away from the
+network in `secrets.h`, it broadcasts `rockybrain?` on UDP port 8767 and
+connects to whichever brain answers, so the brain's computer must be on the
+same network, which must let devices see each other. Keep a phone's hotspot on
+the list: at a new place the robot and the computer can meet there, and you can
+add the local WiFi from the live view. The ESP32 only sees 2.4 GHz, which on
+an iPhone hotspot means turning on Maximize Compatibility.
+
 Optional, in `server/.env`:
 
 - `MIC_SOURCE=robot` listens only through the robot. The computer's mic is

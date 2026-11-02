@@ -44,7 +44,7 @@ import time
 
 import websockets
 
-from . import (alerts, battery, clock, config, faces, kws, logbook, mouth, personality, settings, speakers, store,
+from . import (alerts, battery, clock, config, faces, finder, kws, logbook, mouth, personality, settings, speakers, store,
                touch, wakewords, weather, web)
 from .body import Body
 from .dance import Dancer, length as dance_length
@@ -219,7 +219,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     up, boot = hello.get("up_s"), hello.get("boot")
     started = (f", started {up} s ago by {str(boot)[:20]}" if isinstance(up, int) and up < 120 and boot else "")
     print(f"robot connected! (fw {hello.get('fw', '?')}, {peer}{started})")
-    global robot_wake_word, robot_asleep, powering_off, powered_off, robot_deep_sleep
+    global robot_wake_word, robot_asleep, powering_off, powered_off, robot_deep_sleep, robot_wifi
     powering_off = False  # it powered back on (or never went)
     powered_off = None
     robot_deep_sleep = False
@@ -301,6 +301,9 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
                 continue
             if event.get("type") == "note":  # a line for the log (firmware 0.6.10.5+)
                 print(f"(robot: {str(event.get('text'))[:1000]})")
+                continue
+            if event.get("type") == "wifi":  # where it is and what it knows, for the Settings tab (0.6.10.16+)
+                robot_wifi = event
                 continue
             if event.get("type") == "hush":  # a hand over its sensor stopped it talking (firmware 0.6.9.2+)
                 on_robot_hush()
@@ -1364,6 +1367,7 @@ def console_state() -> dict:
         "name": personality.name(),
         "pronouns": personality.CHARACTER.pronouns,
         "light": eyes.light,
+        "wifi": robot_wifi if robot_socket is not None else None,
         "character": personality.CHARACTER.id,
         "characters": [{"id": c.id, "name": personality.name(c)} for c in characters()],
         "face_pack": face_pack if config.BODY == "stackchan" else None,
@@ -1402,6 +1406,9 @@ async def _console_command(action: str, payload: dict) -> dict:
         if name not in config.EMOTIONS:
             raise ValueError(f"emotions: {', '.join(config.EMOTIONS)}")
         await send_to_robot({"type": "emotion", "name": name})
+    elif action == "wifi":
+        if not await send_to_robot(finder.wifi_message(payload)):
+            raise ValueError("the robot isn't connected")
     elif action == "head":
         if body is not None:
             body.stop()
@@ -1974,6 +1981,7 @@ async def send_weather() -> None:
 
 powering_off = False  # the robot was told to power off; cleared when it says hello again
 robot_deep_sleep = False  # the robot's own deep sleep (on battery), from its battery reports
+robot_wifi: dict | None = None  # the robot's network and the ones it knows, from its wifi reports
 powered_off: tuple[str, float] | None = None  # (why, when) we powered it off; None once it's back
 
 
@@ -2266,6 +2274,7 @@ async def main() -> None:
     dancer.before = _before_dancing
     print("face tracking:", "on" if config.TRACKING else f"off — say \"{config.ROBOT_NAME}, track me\" or type `track on`")
     print("type `ask <question>` to talk to the brain right now\n")
+    finder.serve(config.PORT)
     async with websockets.serve(handle_robot, "0.0.0.0", config.PORT, max_size=256 * 1024):
         voice_task = asyncio.create_task(voice_loop())
         doze_task = asyncio.create_task(doze_loop())

@@ -429,6 +429,18 @@
   <div role="tabpanel" id="p-settings" aria-labelledby="t-settings" hidden>
     <div class="settings" id="settingsbox"></div>
     <div class="settings" style="margin-top:18px">
+      <section class="card" aria-labelledby="l-wifi">
+        <h2 class="label" id="l-wifi"><span>WiFi</span><span class="sub" id="wifinow">robot not connected</span></h2>
+        <div id="wifiknown"></div>
+        <form id="wifiform" autocomplete="off" style="margin-top:12px">
+          <input id="wifissid" maxlength="32" placeholder="Network name" aria-label="network name" autocomplete="off">
+          <input id="wifipass" type="password" maxlength="63" placeholder="Password" aria-label="password" autocomplete="new-password">
+          <button type="submit">Add</button>
+          <button type="button" id="wifiscan">Scan</button>
+        </form>
+        <div id="wifiseen" style="margin-top:8px"></div>
+        <p class="hint">It joins whichever of these it can see, on its own. A scan interrupts its WiFi for a few seconds. On a new network the robot has to reach this computer: keep your phone's hotspot on this list, so you can always add the next one from there. Only 2.4 GHz works, and conference WiFi usually won't.</p>
+      </section>
       <section class="card" aria-labelledby="l-tune">
         <h2 class="label" id="l-tune"><span>Listening</span><span class="sub">applies now · kept</span></h2>
         <div class="tune-grid" id="tunes"></div>
@@ -1161,6 +1173,57 @@
   window.addEventListener("beforeunload", ev => { if (cstate.dirty) { ev.preventDefault(); ev.returnValue = ""; } });
   loadChars();
 
+  // ── WiFi ───────────────────────────────────────────────────────────────
+  let wifiShown = "";
+  function showWifi(w) {
+    const text = JSON.stringify(w || null);
+    if (text === wifiShown) return;
+    wifiShown = text;
+    $("wifinow").textContent = !w ? "robot not connected" : `on ${w.now || "?"} · ${w.ip} · ${w.rssi} dBm`;
+    const box = $("wifiknown"); box.textContent = "";
+    for (const n of (w && w.known) || []) {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:6px";
+      const name = document.createElement("span"); name.style.flex = "1";
+      name.textContent = n.ssid + (n.ssid === w.now ? " (in use)" : "");
+      row.append(name);
+      if (n.ssid !== w.now) {
+        const use = document.createElement("button"); use.type = "button"; use.textContent = "Use";
+        use.onclick = () => {
+          if (confirm(`Move the robot to ${n.ssid}? If this computer isn't on that network, this page loses the robot.`))
+            act("wifi", { op: "use", ssid: n.ssid }, "Moving");
+        };
+        row.append(use);
+      }
+      if (!n.home) {
+        const forget = document.createElement("button"); forget.type = "button"; forget.textContent = "Forget";
+        forget.onclick = () => { if (confirm(`Forget ${n.ssid}?`)) act("wifi", { op: "forget", ssid: n.ssid }, "Forgotten"); };
+        row.append(forget);
+      }
+      box.append(row);
+    }
+    const seen = $("wifiseen"); seen.textContent = "";
+    const known = new Set(((w && w.known) || []).map(n => n.ssid));
+    for (const s of [...((w && w.seen) || [])].sort((a, b) => b.rssi - a.rssi)) {  // strongest first
+      const row = document.createElement("button"); row.type = "button";
+      row.style.cssText = "display:flex;justify-content:space-between;gap:12px;width:100%;margin-top:4px;text-align:left";
+      const name = document.createElement("span"); name.textContent = s.ssid + (known.has(s.ssid) ? " (known)" : "");
+      const signal = document.createElement("span"); signal.textContent = `${s.rssi} dBm${s.open ? ", open" : ""}`;
+      row.append(name, signal);
+      row.onclick = () => { $("wifissid").value = s.ssid; $("wifipass").focus(); };
+      seen.append(row);
+    }
+  }
+  $("wifiscan").onclick = () => act("wifi", { op: "scan" }, "Scanning");
+  $("wifiform").onsubmit = async ev => {
+    ev.preventDefault();
+    try {
+      await api("wifi", { op: "add", ssid: $("wifissid").value.trim(), password: $("wifipass").value });
+      $("wifissid").value = ""; $("wifipass").value = "";
+      toast("Added");
+    } catch (e) { toast(e.message, true); }
+  };
+
   // ── status loop ────────────────────────────────────────────────────────
   let brainStarted = null;
   async function tick() {
@@ -1170,12 +1233,13 @@
       // something is typed in a box, which a reload would lose).
       if (s.brain_started) {
         if (brainStarted === null) brainStarted = s.brain_started;
-        else if (s.brain_started !== brainStarted && !$("saytext").value && !$("memtext").value && !cstate.dirty) {
+        else if (s.brain_started !== brainStarted && !$("saytext").value && !$("memtext").value && !$("wifipass").value && !cstate.dirty) {
           location.reload();
           return;
         }
       }
       status = s;
+      showWifi(s.wifi);
       const linked = !!s.robot;
       $("linkdot").className = "dot" + (linked ? " on" : "");
       const off = !linked && s.powered_off;  // we powered him off, vs. the link just dropped

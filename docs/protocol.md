@@ -51,7 +51,21 @@ below), then the JPEG. With the angle, the face tracker aims from where the
 head really was instead of guessing, so it needn't wait for the head to
 settle. The server takes either type.
 
+Also from the robot, 0.6.10.16+: `{"type": "wifi", "now": ssid, "rssi": n, "ip": "...", "known": [{"ssid": "...",
+"home": bool}], "seen": [{"ssid": "...", "rssi": n, "open": bool}]}` after the hello and after each `wifi_*` message
+below. It never includes a password.
+
+## Finding the brain
+
+On a network with no address in its firmware, or when that address stops answering, the robot broadcasts
+`rockybrain?` on UDP port 8767 every 3 s. A brain answers `rockybrain! <WebSocket port>`.
+
 ## Server → robot
+
+0.6.10.16+, from the live view's WiFi card: `{"type": "wifi_scan"}`, `{"type": "wifi_add", "ssid": "...", "password":
+"..."}`, `{"type": "wifi_use", "ssid": "..."}` (move there now, and prefer it from now on), `{"type": "wifi_forget",
+"ssid": "..."}`.
+
 
 ```json
 {"type": "emotion", "name": "happy"}   // neutral happy sad angry surprised sleepy thinking; firmware-stackchan
