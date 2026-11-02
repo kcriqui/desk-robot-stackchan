@@ -376,7 +376,12 @@
                   <label>Pause (s)<input type="number" id="c-v-pause" step="0.05" min="0" max="2" placeholder="voice's"></label>
                   <label id="c-v-speaker-l" hidden>Speaker<select id="c-v-speaker"></select></label>
                 </div>
-                <p class="hint" id="c-voicehint">A Piper voice from config.py and its tuning; blank = the voice's own. Tune one by ear in Piper Lab (.devtools/piper_lab), then copy its numbers here. Test voice plays a sample here on this computer.</p></fieldset>
+                <p class="hint" id="c-voicehint">A Piper voice from config.py and its tuning; blank = the voice's own. Tune one by ear in Piper Lab (.devtools/piper_lab), then copy its numbers here. Test voice plays a sample here on this computer.</p>
+                <div class="vgrid">
+                  <label style="grid-column:1/-1">Fish Audio voice<input type="text" id="c-fish" maxlength="200" placeholder="a fish.audio voice's link or id; blank = Piper"></label>
+                  <label>Fish speed (×)<input type="number" id="c-fish_speed" step="0.05" min="0.5" max="2" placeholder="1"></label>
+                </div>
+                <p class="hint" id="c-fishhint">With a Fish voice it speaks through Fish Audio (paid per word, FISH_MODEL), and the Piper voice above only stands in when Fish can't.</p></fieldset>
               <div class="set"><label class="k" for="c-face">Face pack</label>
                 <select id="c-face"></select></div>
             </div>
@@ -965,7 +970,9 @@
     for (const v of m.voices) { const o = document.createElement("option"); o.value = v; o.textContent = v + (v === m.default_voice ? " (default)" : ""); $("c-voice").appendChild(o); }
     const d = document.createElement("option"); d.value = ""; d.textContent = "the default (" + m.default_face + ")"; $("c-face").appendChild(d);
     for (const p of m.face_packs) { const o = document.createElement("option"); o.value = p; o.textContent = p; $("c-face").appendChild(o); }
-    if (!m.piper) { $("c-voicehint").textContent = "The brain speaks with Fish Audio (TTS_ENGINE), so these Piper settings aren't used."; $("c-voicehint").classList.add("warn"); $("c-test").disabled = true; }
+    if (m.everyone_fish) { $("c-voicehint").textContent = "TTS_ENGINE=fish: everyone speaks through Fish Audio, so these Piper settings are only the fallback."; $("c-voicehint").classList.add("warn"); }
+    if (!m.fish_key) { $("c-fishhint").textContent = "Add FISH_AUDIO_API_KEY to server/.env (and restart the brain) to use a Fish voice; until then the Piper voice above speaks."; $("c-fishhint").classList.add("warn"); }
+    else $("c-fishhint").textContent += ` Model: ${m.fish_model}. Test voice uses it too (a fraction of a cent).`;
     const box = (key, plain) => {
       const l = document.createElement("label"); l.textContent = LINE_NAMES[key] || key;
       const i = document.createElement("input"); i.type = "text"; i.id = "c-l-" + key; i.maxLength = 300; i.placeholder = plain; l.appendChild(i);
@@ -1037,6 +1044,7 @@
     $("c-voice").value = v.piper || cstate.meta.default_voice;
     for (const k of VKEYS) if (k !== "speaker") $("c-v-" + k).value = v[k] ?? "";
     showSpeakers(v.speaker || "");
+    $("c-fish").value = v.fish || ""; $("c-fish_speed").value = v.fish_speed ?? "";
     $("c-face").value = cstate.meta.face_packs.includes(ch.face) ? ch.face : "";
   }
   function charFromForm() {
@@ -1050,6 +1058,8 @@
       if (k === "speaker" && $("c-v-speaker-l").hidden) continue;
       const t = $("c-v-" + k).value.trim(); if (t !== "") voice[k] = k === "pitch_mode" || k === "speaker" ? t : Number(t);
     }
+    const fish = $("c-fish").value.trim(), fs = $("c-fish_speed").value.trim();
+    if (fish) { voice.fish = fish; if (fs !== "") voice.fish_speed = Number(fs); }
     return { name: $("c-name").value.trim(), pronouns: $("c-pron").value, description: $("c-desc").value.trim(), identity: $("c-identity").value.trim(),
              style: $("c-style").value.trim(), emotions: $("c-emotions").value.trim(),
              examples: $("c-examples").value.split("\n").map(l => l.trim()).filter(Boolean), leads, lines, voice, face: $("c-face").value,

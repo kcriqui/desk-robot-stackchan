@@ -1,11 +1,12 @@
-"""Looking things up: the live weather (weather.py) and web search
-(web.py). No network: both services are faked."""
+"""Looking things up: the live weather (weather.py), web search (web.py) and the store (store.py).
+No network: the services are faked."""
 
+import json
 import unittest
 from types import SimpleNamespace as NS
 from unittest import mock
 
-from brain import config, personality, thinking, weather, web
+from brain import config, personality, store, thinking, weather, web
 
 PORTLANDS = {"results": [
     {"name": "Portland", "admin1": "Oregon", "country": "United States", "country_code": "US",
@@ -170,10 +171,80 @@ class ClockTests(unittest.TestCase):
             self.assertIsNone(clock.weather_message())   # no HOME_LOCATION: nothing to show
 
 
+STORE_TOOLS = [{"name": "orders_to_ship", "description": "Unshipped orders.",
+                 "input_schema": {"type": "object", "properties": {}}}]
+
+
+def store_with(*replies, calls=None):
+    """A Store with a fake model (`replies`) and a fake store API: /tools, then each /call answered from `calls`."""
+    s = store.Store.__new__(store.Store)
+    s.client = NS(messages=FakeMessages(replies))
+    s.tools = None
+    s.sent = []
+
+    def http(path, body=None):
+        s.sent.append((path, body))
+        return STORE_TOOLS if path == "/tools" else (calls or {}).get(body["name"], {"error": "unknown tool"})
+    s._http = http
+    return s
+
+
+def tool_use(name, inp=None, tid="t1"):
+    return NS(stop_reason="tool_use", content=[NS(type="text", text="Checking."),
+                                               NS(type="tool_use", id=tid, name=name, input=inp or {})])
+
+
+class StoreTests(unittest.TestCase):
+    def test_tool_calls_go_to_the_store_and_back(self):
+        s = store_with(tool_use("orders_to_ship"), response("end_turn", "Two orders are due ", "today."),
+                       calls={"orders_to_ship": {"result": [{"days_left": 0}, {"days_left": 0}]}})
+        self.assertEqual(s.ask("anything to ship?"), "Two orders are due today.")
+        self.assertEqual(s.sent, [("/tools", None), ("/call", {"name": "orders_to_ship", "input": {}})])
+        first, second = s.client.messages.calls
+        self.assertEqual(first["tools"], STORE_TOOLS)
+        result = second["messages"][-1]
+        self.assertEqual(result["role"], "user")
+        self.assertEqual(result["content"][0]["tool_use_id"], "t1")
+        self.assertEqual(json.loads(result["content"][0]["content"]), [{"days_left": 0}, {"days_left": 0}])
+        self.assertNotIn("is_error", result["content"][0])
+
+    def test_a_store_error_is_marked(self):
+        s = store_with(tool_use("listing_info", {"query": "laser"}), response("end_turn", "eBay is down."),
+                       calls={"listing_info": {"error": "HTTPError: 503"}})
+        s.ask("how many watchers on the laser?")
+        self.assertTrue(s.client.messages.calls[1]["messages"][-1]["content"][0]["is_error"])
+
+    def test_tools_fetched_once(self):
+        s = store_with(response("end_turn", "a"), response("end_turn", "b"))
+        s.ask("q1"), s.ask("q2")
+        self.assertEqual([p for p, _ in s.sent], ["/tools"])
+
+    def test_no_answer_and_endless_tools(self):
+        self.assertEqual(store_with(response("end_turn", " ")).ask("q"), "The store couldn't answer that.")
+        s = store_with(*[tool_use("orders_to_ship")] * store.MAX_ROUNDS, calls={"orders_to_ship": {"result": []}})
+        self.assertEqual(s.ask("q"), "The store couldn't answer that.")
+
+    def test_unreachable_tool_list_raises(self):
+        s = store_with()
+        s._http = lambda path, body=None: {"error": "missing or wrong API key"}
+        with self.assertRaises(OSError):
+            s.ask("q")
+
+    def test_only_offered_when_set_up(self):
+        with mock.patch.dict("os.environ", {"LLM_API_KEY": "k"}), \
+                mock.patch.object(config, "LLM_BASE_URL", "https://api.anthropic.com/v1/"):
+            with mock.patch.object(config, "STORE_API", ""):
+                self.assertFalse(store.available())
+            with mock.patch.object(config, "STORE_API", "http://127.0.0.1:8790"):
+                self.assertEqual(store.available(), store.anthropic is not None)
+                with mock.patch.object(config, "LLM_BASE_URL", "https://openrouter.ai/api/v1"):
+                    self.assertFalse(store.available())
+
+
 class WiringTests(unittest.TestCase):
     def test_tools_and_prompt(self):
         names = {t["function"]["name"] for t in thinking.TOOLS}
-        self.assertLessEqual({"web_search", "check_weather"}, names)
+        self.assertLessEqual({"web_search", "check_weather", "check_store"}, names)
         self.assertIn("`check_weather`", personality.SYSTEM_PROMPT)
 
 

@@ -1,10 +1,11 @@
 """Mouth: turn the robot's words into sound.
 
-Three voices (config.TTS_ENGINE picks; "auto" takes the first available):
-  * Fish Audio (Rocky's real voice, config.TTS_VOICE_ID) when
-    FISH_AUDIO_API_KEY is set. Plain HTTPS POST asking for raw 16 kHz PCM. The response body
+Three voices (config.TTS_ENGINE picks; "auto" takes the first available for the speaking character):
+  * Fish Audio when FISH_AUDIO_API_KEY is set, for a character with a Fish voice of its own ("fish" in its
+    voice), or everyone with TTS_ENGINE=fish (config.TTS_VOICE_ID, Rocky's real voice, for those without).
+    Plain HTTPS POST asking for raw 16 kHz PCM, with config.FISH_MODEL. The response body
     streams, so the first audio arrives ~0.3 s in, long before the sentence
-    is finished, and is passed straight on to the speaker.
+    is finished, and is passed straight on to the speaker. If it fails, Piper says the sentence.
   * Piper (config.PIPER_VOICE, or the speaking character's), a free voice that runs on this computer, when
     it's installed (requirements-piper.txt; optional because it's GPL-3.0).
     A sentence takes well under 0.1 s, then Praat (parselmouth) shifts its
@@ -32,6 +33,7 @@ import tempfile
 import threading
 import time
 import importlib.util
+import urllib.error
 import urllib.request
 import wave
 from collections.abc import Iterator
@@ -46,8 +48,20 @@ SAMPLE_RATE = 16_000
 FISH_TTS_URL = "https://api.fish.audio/v1/tts"
 
 
-def fish_available() -> bool:
-    return bool(config.TTS_VOICE_ID and os.environ.get("FISH_AUDIO_API_KEY"))
+def fish_voice(c=None) -> str:
+    """The Fish Audio voice a character (personality.Character, the speaking one by default) speaks in, or "":
+    its own ("fish" in its voice); else TTS_VOICE_ID when TTS_ENGINE=fish, or for a character with no voice of
+    its own (built-in Rocky) when Piper isn't installed."""
+    from . import personality
+
+    v = (c or personality.CHARACTER).voice
+    if v.get("fish"):
+        return v["fish"]
+    return config.TTS_VOICE_ID if config.TTS_ENGINE == "fish" or (not v and not piper_available()) else ""
+
+
+def fish_available(c=None) -> bool:
+    return bool(os.environ.get("FISH_AUDIO_API_KEY") and fish_voice(c))
 
 
 def piper_available() -> bool:
@@ -55,11 +69,13 @@ def piper_available() -> bool:
     return all(importlib.util.find_spec(m) is not None for m in ("piper", "parselmouth"))
 
 
-def engine() -> str:
-    """The voice to try first: fish, piper or builtin (config.TTS_ENGINE)."""
-    if config.TTS_ENGINE != "auto":
+def engine(c=None) -> str:
+    """The voice to try first for a character (the speaking one by default): fish, piper or builtin.
+    config.TTS_ENGINE "auto": Fish for a character with a Fish voice (fish_voice) once FISH_AUDIO_API_KEY is
+    set, else Piper if it's installed, else the computer's own."""
+    if config.TTS_ENGINE in ("piper", "builtin"):
         return config.TTS_ENGINE
-    if fish_available():
+    if config.TTS_ENGINE == "fish" or fish_available(c):
         return "fish"
     return "piper" if piper_available() else "builtin"
 
@@ -69,7 +85,12 @@ def prepare() -> str:
     plus a one-time download) and say which one will speak."""
     e = engine()
     if e == "fish":
-        return "voice: Fish Audio" if fish_available() else "voice: the computer's own (TTS_ENGINE=fish, but no FISH_AUDIO_API_KEY)"
+        if not fish_available():
+            return "voice: the computer's own (TTS_ENGINE=fish, but no FISH_AUDIO_API_KEY)"
+        if piper_available() and config.TTS_ENGINE != "fish":
+            _warm_piper()  # the fallback, and the voice of characters without a Fish one
+        from . import personality
+        return f"voice: Fish Audio {fish_voice()} ({config.FISH_MODEL}, {personality.CHARACTER.name})"
     if e == "piper":
         if not piper_available():
             return "voice: the computer's own (TTS_ENGINE=piper, but Piper isn't installed: pip install -r requirements-piper.txt)"
@@ -80,6 +101,13 @@ def prepare() -> str:
         from . import personality
         return f"voice: Piper {personality.voice()[0]} ({personality.CHARACTER.name})"
     return "voice: the computer's own"
+
+
+def _warm_piper() -> None:
+    try:
+        _synthesize_piper("Hello.")
+    except Exception as ex:  # it will say so again if it's ever needed
+        print(f"(piper didn't load: {ex})")
 
 
 _MARKUP = re.compile(r"[*_`#~<>\[\]{}|\\]")
@@ -100,26 +128,31 @@ def clean_for_tts(text: str) -> str:
     return text
 
 
-def _fish_stream(text: str) -> Iterator[bytes]:
-    """Raw 16 kHz PCM from Fish Audio, yielded as the server produces it."""
-    body = json.dumps(
-        {
-            "text": text,
-            "reference_id": config.TTS_VOICE_ID,
-            "format": "pcm",          # headerless s16le at sample_rate: nothing to parse
-            "sample_rate": SAMPLE_RATE,
-            "latency": "balanced",    # a little faster to the first byte than "normal"
-            "temperature": config.TTS_TEMPERATURE,
-            "top_p": config.TTS_TOP_P,
-        }
-    ).encode()
+def _fish_stream(text: str, c=None) -> Iterator[bytes]:
+    """Raw 16 kHz PCM from Fish Audio in a character's voice (fish_voice; the speaking one by default), yielded
+    as the server produces it."""
+    from . import personality
+
+    v = (c or personality.CHARACTER).voice
+    body = {
+        "text": text,
+        "reference_id": fish_voice(c),
+        "format": "pcm",          # headerless s16le at sample_rate: nothing to parse
+        "sample_rate": SAMPLE_RATE,
+        "latency": "balanced",    # a little faster to the first byte than "normal"
+        "temperature": config.TTS_TEMPERATURE,
+        "top_p": config.TTS_TOP_P,
+    }
+    if v.get("fish_speed"):
+        body["prosody"] = {"speed": float(v["fish_speed"])}
     req = urllib.request.Request(
         FISH_TTS_URL,
-        data=body,
+        data=json.dumps(body).encode(),
         method="POST",
         headers={
             "Authorization": f"Bearer {os.environ['FISH_AUDIO_API_KEY']}",
             "Content-Type": "application/json",
+            "model": config.FISH_MODEL,  # which of Fish's models (and prices): config.py
         },
     )
     # python.org builds of Python on macOS don't see the system root certs;
@@ -135,6 +168,17 @@ def _fish_stream(text: str) -> Iterator[bytes]:
                 carry = b""
             if chunk:
                 yield chunk
+
+
+def _fish_error(ex: Exception) -> str:
+    """What went wrong with Fish, with the reason it gave (out of credit, unknown voice...) when it gave one."""
+    if isinstance(ex, urllib.error.HTTPError):
+        try:
+            reason = ex.read(300).decode("utf-8", "replace").strip()
+        except Exception:
+            reason = ""
+        return f"HTTP {ex.code}" + (f": {reason}" if reason else "")
+    return str(ex)
 
 
 class Biquad:
@@ -442,10 +486,12 @@ def stream(text: str, leveler: Leveler | None = None) -> Iterator[bytes]:
             try:
                 chunks = _fish_stream(text)
                 first = next(chunks, b"")
-            except Exception as ex:  # network, auth, bad voice id... still speak
-                print(f"(fish audio failed, using the built-in voice: {ex})")
+            except Exception as ex:  # network, auth, no credit, bad voice id... still speak
+                fallback = "Piper" if piper_available() else "the built-in voice"
+                print(f"(fish audio failed, using {fallback}: {_fish_error(ex)})")
                 chunks = None
-        elif e == "piper" and piper_available():
+                e = "piper"
+        if chunks is None and e == "piper" and piper_available():
             try:
                 chunks = _pieces(_synthesize_piper(text))
                 first = next(chunks, b"")
@@ -477,10 +523,15 @@ def stream(text: str, leveler: Leveler | None = None) -> Iterator[bytes]:
 
 
 def sample_wav(text: str, character) -> bytes:
-    """How a character (personality.Character) sounds saying `text`, as a WAV file for the browser."""
-    if engine() != "piper":
-        raise ValueError("the brain speaks with Fish Audio (TTS_ENGINE), so a character's Piper voice isn't used")
-    pcm = normalize(_synthesize_piper(text, character), 0.9)
+    """How a character (personality.Character) sounds saying `text`, as a WAV file for the browser: its Fish
+    voice when it has one and the key is set (a fraction of a cent), else its Piper voice."""
+    e = engine(character)
+    if e == "fish" and fish_available(character):
+        pcm = normalize(b"".join(_fish_stream(clean_for_tts(text), character)), 0.9)
+    elif e == "builtin" or not piper_available():
+        raise ValueError("no voice to test: Piper isn't installed and there's no Fish Audio voice and key")
+    else:
+        pcm = normalize(_synthesize_piper(text, character), 0.9)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(SAMPLE_RATE); w.writeframes(pcm)

@@ -24,7 +24,10 @@ same fields:
       "leads": {"search": "a few words before a web search", "dance": "a few words before a dance"},
       "lines": {"wake": "...", "sleep": "...", ...},      missing ones are DEFAULT_LINES
       "voice": {"piper": "en_US-kristin-medium", "pitch": 1, "pitch_mode": "resample",
-                "intonation": 0, "speed": 1.05, "noise": 0, "noise_w": 0, "pause": 0.2},
+                "intonation": 0, "speed": 1.05, "noise": 0, "noise_w": 0, "pause": 0.2,
+                "fish": "<id>", "fish_speed": 1.0},       optional: a Fish Audio voice (its id or page
+                                                           address), used once FISH_AUDIO_API_KEY is set;
+                                                           Piper then speaks only when Fish can't
       "face": "custom/glados"                              a face pack (server/faces/)
     }
 
@@ -45,7 +48,7 @@ import string
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, wakewords, web
+from . import config, store, wakewords, web
 
 CHARACTERS_DIR = Path(__file__).resolve().parent.parent / "characters"
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
@@ -216,6 +219,11 @@ def _shared(c: Character) -> str:
               f"current fact. Before searching, say a few words first, like \"{c.leads.get('search', 'One moment.')}\" "
               "Then give the answer in your own words, briefly, with when it is from if that matters.\n"
               if web.available() else "")
+    if store.available():
+        search += ("- `check_store` answers questions about {human}'s online store: orders to ship, buyer "
+                   "messages, store reminders, sales, a listing, or what's on their plate today. Use it for those; "
+                   "never guess. Say a few words first, as before a search, then give the answer in your own "
+                   "words. It can't change anything: if asked to, say {human} has to do that at the computer.\n")
     others = [o for o in available() if o.id != c.id]
     switch = ("- `switch_character` hands the robot over to another character: "
               + "; ".join(f"{o.id} ({name(o)}, {'/'.join(PRONOUNS[o.pronouns][:2])}: {o.description or 'no description'})"
@@ -347,7 +355,8 @@ def _path(char_id: str) -> Path:
 
 # The voice settings a character may give, with their ranges (config.PIPER_VOICES explains them).
 VOICE_RANGES = {"pitch": (-12, 12), "intonation": (0, 2), "speed": (0.5, 2), "noise": (0, 1.5),
-                "noise_w": (0, 1.5), "pause": (0, 2)}
+                "noise_w": (0, 1.5), "pause": (0, 2), "fish_speed": (0.5, 2)}
+FISH_ID = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{32}(?![0-9a-fA-F])")  # a Fish Audio voice's id, alone or in its address
 PITCH_MODES = ("resample", "keep_size")
 LOCAL_VOICE = re.compile(r"[a-z]{2,3}_[A-Z]{2}-[A-Za-z0-9_]+-(x_low|low|medium|high)")  # a Piper voice's file name
 
@@ -408,13 +417,22 @@ def parse(char_id: str, d) -> Character:
     if isinstance(most, bool) or not isinstance(most, int) or not 0 <= most <= 12:
         raise ValueError(f"{char_id}: max_sentences is a whole number from 1 to 12 (0 = the usual)")
     voice = dict(d.get("voice", {}))
+    if voice.get("fish"):  # a Fish Audio voice: its id, or its page's address
+        m = FISH_ID.search(str(voice["fish"]))
+        if not m:
+            raise ValueError(f"{char_id}: voice.fish is a Fish Audio voice's 32-character id or its page's address")
+        voice["fish"] = m.group(0).lower()
+    else:
+        voice.pop("fish", None)
+    if voice and not voice.get("piper"):  # a Fish voice alone: Piper's default stands in when Fish can't speak
+        voice["piper"] = config.PIPER_VOICE
     if voice:
         here = voice.get("piper") in config.PIPER_VOICES
         # a local voice (config.PIPER_LOCAL_DIR) may be missing on this computer: voice() stands in for it
         if not here and not LOCAL_VOICE.fullmatch(str(voice.get("piper"))):
             raise ValueError(f"{char_id}: voice.piper must be one of {', '.join(config.PIPER_VOICES)} (config.py)")
         for k, v in voice.items():
-            if k == "piper" or (k in ("noise", "noise_w") and v is None) or (k == "speaker" and not here):
+            if k in ("piper", "fish") or (k in ("noise", "noise_w") and v is None) or (k == "speaker" and not here):
                 continue
             if k == "speaker":
                 speakers = config.PIPER_VOICES[voice["piper"]].get("speakers", [])

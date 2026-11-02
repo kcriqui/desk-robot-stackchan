@@ -181,6 +181,23 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "check_store",
+            "description": (
+                "Ask about your human's online store: orders to ship and when they're due, buyer messages waiting, "
+                "store reminders, sales and what sold, one listing's price, stock and watchers, or everything on "
+                "their plate today. Ask one clear question in plain words (\"which orders are due today?\"). "
+                "Read-only. Takes a few seconds."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"question": {"type": "string"}},
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "web_search",
             "description": (
                 "Look something up on the internet: news, prices, scores, opening hours, people, "

@@ -44,8 +44,8 @@ import time
 
 import websockets
 
-from . import (alerts, battery, clock, config, faces, kws, logbook, mouth, personality, settings, speakers, touch,
-               wakewords, weather, web)
+from . import (alerts, battery, clock, config, faces, kws, logbook, mouth, personality, settings, speakers, store,
+               touch, wakewords, weather, web)
 from .body import Body
 from .dance import Dancer, length as dance_length
 from .memories import Memories
@@ -730,6 +730,18 @@ def web_search(args: dict) -> tuple[str, bytes | None]:
         return ("The search failed just now (no internet or the search service is busy). Say so.", None)
 
 
+def check_store(args: dict) -> tuple[str, bytes | None]:
+    question = str(args.get("question") or "").strip()
+    if not question:
+        return ("Ask about what? One clear question about the store.", None)
+    print(f"  (asking the store: {question})")
+    try:
+        return (shop.ask(question), None)
+    except Exception as e:  # the store API not running, eBay down, a timeout: say so, don't crash the turn
+        print(f"  (store question failed: {e})")
+        return ("The store's information isn't reachable just now (its program may not be running). Say so.", None)
+
+
 def check_weather(args: dict) -> tuple[str, bytes | None]:
     try:
         return (weather.report(str(args.get("place") or "")), None)
@@ -993,6 +1005,9 @@ ABILITIES.update(check_temperature=check_temperature, set_timer=set_timer, cance
 searcher = web.WebSearch() if web.available() else None
 if searcher is not None:  # Anthropic as the provider (web.py)
     ABILITIES["web_search"] = web_search
+shop = store.Store() if store.available() else None
+if shop is not None:  # a store API set up (STORE_API) and Anthropic as the provider (store.py)
+    ABILITIES["check_store"] = check_store
 if voices is not None:  # sherpa-onnx installed (speakers.py)
     ABILITIES.update(learn_voice=learn_voice, forget_voice=forget_voice)
 if config.BODY == "stackchan":  # the original body has no battery sensor
@@ -1468,7 +1483,8 @@ async def _console_command(action: str, payload: dict) -> dict:
                 "speakers": {k: v["speakers"] for k, v in config.PIPER_VOICES.items() if v.get("speakers")},
                 "default_voice": config.PIPER_VOICE, "face_packs": [p["id"] for p in face_packs()],
                 "default_face": config.FACE_PACK, "lines": personality.DEFAULT_LINES,
-                "piper": mouth.engine() == "piper"}
+                "everyone_fish": config.TTS_ENGINE == "fish", "fish_key": bool(os.environ.get("FISH_AUDIO_API_KEY")),
+                "fish_model": config.FISH_MODEL}
     elif action == "character_save":
         cid = payload.get("id") or None
         cid = personality.save(payload.get("character"), cid)
@@ -1856,9 +1872,11 @@ async def use_character(char_id: str) -> str:
         brain.history.clear()
     face_pack = personality.face_pack()
     await send_face_pack()
-    print(f"character: {c.name} (voice {personality.voice()[0]}, face {face_pack})")
-    if mouth.engine() == "piper":
-        # Load (the first time, download) the new voice now, not on the first reply.
+    said = (f"Fish Audio {mouth.fish_voice()}, Piper {personality.voice()[0]} if it can't" if mouth.engine() == "fish"
+            else personality.voice()[0])
+    print(f"character: {c.name} (voice {said}, face {face_pack})")
+    if mouth.piper_available() and config.TTS_ENGINE != "builtin":
+        # Load (the first time, download) the new Piper voice now, not on the first reply (with Fish: its stand-in).
         asyncio.get_running_loop().run_in_executor(None, _warm_voice)
     return c.name
 

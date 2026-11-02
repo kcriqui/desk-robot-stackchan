@@ -80,7 +80,13 @@ PORT = 8765
 # canned lines) is in personality.py.
 #   TTS_VOICE_ID  Fish Audio (fish.audio) voice: open the voice's page on the
 #                 site and copy the 32-char ID from the URL. Needs
-#                 FISH_AUDIO_API_KEY in server/.env.
+#                 FISH_AUDIO_API_KEY in server/.env. Used with TTS_ENGINE=fish
+#                 (or with no Piper) by characters without a Fish voice of
+#                 their own ("fish" in a character's voice; personality.py).
+#   FISH_MODEL    which of Fish's models speaks (FISH_MODEL in server/.env):
+#                 s2.1-pro ($15 per million bytes of text, Fish's default),
+#                 s2.1-pro-free (free under fair-use limits, no speed
+#                 guarantee), s2-pro, drama-3 (more expressive, dearer).
 #   TTS_TEMPERATURE / TTS_TOP_P
 #                 Fish generation settings. Lower = steadier, fewer
 #                 hallucinated sounds/laughs/extra words (a known quirk of
@@ -100,6 +106,7 @@ PORT = 8765
 # The console page has sliders for level / bass cut / presence that apply
 # live; set the winners here to keep them.
 TTS_VOICE_ID = "6dd07916890445e59c5f019ad0fc7879"
+FISH_MODEL = os.environ.get("FISH_MODEL", "s2.1-pro").strip() or "s2.1-pro"
 TTS_TEMPERATURE = 0.4
 TTS_TOP_P = 0.6
 REPLY_MAX_SENTENCES = 3
@@ -112,10 +119,11 @@ TTS_FALLBACK_VOICE = "Fred"  # built-in voice used until Fish Audio is set up: a
                              # voice name (`say -v ?` lists them); Windows and Linux use their default
 
 # Which voice speaks. TTS_ENGINE in server/.env:
-#   auto     Fish Audio if FISH_AUDIO_API_KEY is set, else Piper if it's
-#            installed, else the computer's own voice (the default)
-#   fish / piper / builtin   that one, falling back to the computer's own
-#            voice if it can't speak
+#   auto     Fish Audio for a character with a Fish voice once
+#            FISH_AUDIO_API_KEY is set, else Piper if it's installed, else
+#            the computer's own voice (the default)
+#   fish / piper / builtin   that one for everyone; Fish falls back to Piper,
+#            and Piper to the computer's own voice, if it can't speak
 TTS_ENGINE = os.environ.get("TTS_ENGINE", "auto").strip().lower()
 if TTS_ENGINE not in ("auto", "fish", "piper", "builtin"):
     raise SystemExit(f"TTS_ENGINE={TTS_ENGINE!r} in server/.env: use auto, fish, piper or builtin")
@@ -177,6 +185,18 @@ PIPER_VOICES = {
         "sha256": {
             ".onnx": "d6dab6f3b92db43ea3f78c7f20dc8eadb47a1f15d8a1c9d451cf3ccd201a2f66",
             ".onnx.json": "6425dcb878684043b77d772b173ae006d86a583b110303edda48b8438ecee5ee",
+        },
+    },
+    # 109 British readers (CC BY 4.0); the 43 men (by pitch, .devtools/piper_lab/vctk_men.py). Atlas is p243.
+    "en_GB-vctk-medium": {
+        "pitch": 0.0, "speed": 1.0, "noise": None, "noise_w": None,
+        "speakers": ["p243", "p226", "p227", "p232", "p237", "p241", "p245", "p246", "p247", "p251", "p252",
+                     "p254", "p256", "p258", "p259", "p260", "p263", "p270", "p271", "p272", "p274", "p275",
+                     "p278", "p279", "p281", "p284", "p285", "p287", "p292", "p298", "p302", "p304", "p311",
+                     "p316", "p326", "p334", "p345", "p347", "p360", "p363", "p364", "p374", "p376"],
+        "sha256": {
+            ".onnx": "4e9fc85ab9009385319fc6bae7f55577f8a2d7ee77fd9159a5500eb6531f41e6",
+            ".onnx.json": "7f85e6391ed0f7f46e4abd19345929a16be931a0c9945086f96692dce2087fa8",
         },
     },
     # 904 audiobook readers. The speakers listed are the closest to the original StackChan's voice (captured from
@@ -487,6 +507,10 @@ MAX_HISTORY_TURNS = 20
 # costs ~1 cent. check_weather (weather.py) is free.
 WEB_SEARCH = os.environ.get("WEB_SEARCH", "1") != "0"
 SEARCH_MAX_USES = 3        # searches per question, at most
+# Questions about your online store (check_store; store.py): the address of a read-only store API that lists its
+# tools at GET /tools and runs them at POST /call, e.g. http://127.0.0.1:8790. Empty = no store. Needs Anthropic as
+# the provider; STORE_API_KEY in server/.env if the store API isn't on this computer.
+STORE_API = os.environ.get("STORE_API", "").strip()
 # Home, for the weather and local searches: "Portland, OR", "Paris, France".
 # Set it in server/.env; with none, he asks where.
 HOME_LOCATION = os.environ.get("HOME_LOCATION", "").strip()
