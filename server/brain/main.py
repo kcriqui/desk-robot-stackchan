@@ -303,6 +303,13 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
                 print(f"(robot: {str(event.get('text'))[:1000]})")
                 continue
             if event.get("type") == "wifi":  # where it is and what it knows, for the Settings tab (0.6.10.16+)
+                if event.get("failed"):
+                    known = event.get("known") if isinstance(event.get("known"), list) else []
+                    saved = next((n.get("has_password", True) for n in known
+                                  if isinstance(n, dict) and n.get("ssid") == event["failed"]), True)
+                    event["failed_why"] = finder.join_failure(str(event["failed"])[:32], event.get("reason"), saved)
+                    if event["failed"] != (robot_wifi or {}).get("failed"):
+                        print(f"(robot: {event['failed_why']})")
                 robot_wifi = event
                 continue
             if event.get("type") == "hush":  # a hand over its sensor stopped it talking (firmware 0.6.9.2+)
@@ -1368,6 +1375,7 @@ def console_state() -> dict:
         "pronouns": personality.CHARACTER.pronouns,
         "light": eyes.light,
         "wifi": robot_wifi if robot_socket is not None else None,
+        "wifi_saved": sorted(finder.saved_networks()),
         "character": personality.CHARACTER.id,
         "characters": [{"id": c.id, "name": personality.name(c)} for c in characters()],
         "face_pack": face_pack if config.BODY == "stackchan" else None,
@@ -1407,7 +1415,11 @@ async def _console_command(action: str, payload: dict) -> dict:
             raise ValueError(f"emotions: {', '.join(config.EMOTIONS)}")
         await send_to_robot({"type": "emotion", "name": name})
     elif action == "wifi":
-        if not await send_to_robot(finder.wifi_message(payload)):
+        if payload.get("op") == "add_saved":
+            message = await asyncio.to_thread(finder.saved_message, payload.get("ssid"))
+        else:
+            message = finder.wifi_message(payload)
+        if not await send_to_robot(message):
             raise ValueError("the robot isn't connected")
     elif action == "head":
         if body is not None:

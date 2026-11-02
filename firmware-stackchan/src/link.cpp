@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "0.6.10.16";
+static const char* FW_VERSION = "0.6.10.20";
 
 static const size_t MAX_NETWORKS = 8;
 static const uint32_t JOIN_MS = 15000;           // give up on a network after this long
@@ -15,6 +15,8 @@ static const uint32_t RESCAN_MS = 3000;          // nothing to join: look again 
 static const uint16_t FINDER_PORT = 8767;        // server/brain/finder.py
 static const uint32_t ASK_MS = 3000;             // how often to ask for a brain while there's none
 static const uint32_t BRAIN_PATIENCE_MS = 12000;  // an address that fails this long gives way to a brain that answered
+static const uint32_t BRAIN_WAIT_MS = 60000;      // no brain on this network for this long: try another known one
+static const uint32_t BRAIN_WAIT_LONG_MS = 300000;  // tried them all (the brain may just be off): look less often
 
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
@@ -36,6 +38,8 @@ void Link::begin(const char* ssid, const char* pass, const char* host,
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
 
+  WiFi.onEvent([this](WiFiEvent_t, WiFiEventInfo_t info) { lastReason_ = info.wifi_sta_disconnected.reason; },
+               ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   ws_.onEvent([this](WStype_t type, uint8_t* payload, size_t length) {
     onEvent(type, payload, length);
   });
@@ -46,7 +50,8 @@ void Link::loadNetworks(const char* homeSsid, const char* homePass) {
   Preferences p;
   p.begin("wifi", true);
   String saved = p.getString("list", "[]");
-  last_ = p.getString("last", homeSsid);
+  savedLast_ = p.getString("last", homeSsid);
+  last_ = savedLast_;
   p.end();
   networks_.push_back({homeSsid, homePass});
   JsonDocument doc;
@@ -61,7 +66,7 @@ void Link::loadNetworks(const char* homeSsid, const char* homePass) {
 }
 
 // Everything but the first: that one comes from secrets.h.
-void Link::saveNetworks() const {
+void Link::saveNetworks() {
   JsonDocument doc;
   JsonArray list = doc.to<JsonArray>();
   for (size_t i = 1; i < networks_.size(); ++i) {
@@ -74,7 +79,7 @@ void Link::saveNetworks() const {
   Preferences p;
   p.begin("wifi", false);
   p.putString("list", out);
-  p.putString("last", last_);
+  p.putString("last", savedLast_);
   p.end();
 }
 
@@ -98,7 +103,7 @@ void Link::onScanDone(int found, uint32_t nowMs, bool wifiUp) {
     if (ssid.isEmpty()) continue;
     auto same = std::find_if(seen.begin(), seen.end(), [&](const Seen& s) { return s.ssid == ssid; });
     int rssi = WiFi.RSSI(i);
-    if (same == seen.end()) seen.push_back({ssid, rssi, WiFi.encryptionType(i) == WIFI_AUTH_OPEN});
+    if (same == seen.end()) seen.push_back({ssid, rssi, static_cast<int>(WiFi.encryptionType(i))});
     else same->rssi = max(same->rssi, rssi);  // a mesh: the same name more than once
   }
   WiFi.scanDelete();
@@ -109,7 +114,12 @@ void Link::onScanDone(int found, uint32_t nowMs, bool wifiUp) {
     if (seen_.size() > 20) seen_.resize(20);
     sendWifi();
   }
-  if (wifiUp) return;
+  bool moving = movingOn_;
+  movingOn_ = false;
+  if (wifiUp) {
+    if (moving && !connected_) moveOn(seen, nowMs);
+    return;
+  }
 
   // The last one used first, so a choice made in the live view sticks while that network is there; then by signal.
   toTry_.clear();
@@ -126,6 +136,26 @@ void Link::onScanDone(int found, uint32_t nowMs, bool wifiUp) {
   joinNext(nowMs);
 }
 
+// A network can join fine and still have no brain on it: the wrong one, or one that keeps devices apart. Try the
+// other known ones in sight, each once a round, and come back here if none will join.
+void Link::moveOn(const std::vector<Seen>& seen, uint32_t nowMs) {
+  if (std::find(triedNoBrain_.begin(), triedNoBrain_.end(), here_) == triedNoBrain_.end()) {
+    triedNoBrain_.push_back(here_);
+  }
+  for (const Seen& s : seen) {
+    if (!knows(s.ssid) || std::find(triedNoBrain_.begin(), triedNoBrain_.end(), s.ssid) != triedNoBrain_.end()) continue;
+    Serial.printf("wifi: no brain on \"%s\", trying \"%s\"\n", here_.c_str(), s.ssid.c_str());
+    triedNoBrain_.push_back(s.ssid);
+    toTry_ = {s.ssid, here_};
+    WiFi.disconnect();
+    joinNext(nowMs);
+    return;
+  }
+  Serial.printf("wifi: no brain on any known network, staying on \"%s\"\n", here_.c_str());
+  triedNoBrain_.clear();
+  brainWaitMs_ = BRAIN_WAIT_LONG_MS;
+}
+
 void Link::joinNext(uint32_t nowMs) {
   joining_ = false;
   if (toTry_.empty()) {
@@ -137,6 +167,8 @@ void Link::joinNext(uint32_t nowMs) {
   for (const Network& n : networks_) {
     if (n.ssid != ssid) continue;
     Serial.printf("wifi: joining \"%s\"...\n", ssid.c_str());
+    joiningSsid_ = ssid;
+    lastReason_ = 0;
     WiFi.begin(ssid.c_str(), n.pass.isEmpty() ? nullptr : n.pass.c_str());
     joining_ = true;
     joinAtMs_ = nowMs;
@@ -149,11 +181,11 @@ void Link::onJoined(uint32_t nowMs) {
   joining_ = false;
   toTry_.clear();
   String ssid = WiFi.SSID();
+  if (ssid == failedSsid_) failedSsid_ = "";
   Serial.printf("wifi: connected to \"%s\", ip %s\n", ssid.c_str(), WiFi.localIP().toString().c_str());
-  if (ssid != last_) {
-    last_ = ssid;
-    saveNetworks();
-  }
+  last_ = ssid;  // kept in flash once a brain answers here, so a restart can't bring back a bad choice
+  noBrainSinceMs_ = nowMs;
+  if (brainWaitMs_ == 0) brainWaitMs_ = BRAIN_WAIT_MS;
   finder_.stop();
   finder_.begin(FINDER_PORT);
   nextAskMs_ = nowMs;
@@ -203,22 +235,33 @@ void Link::sendWifi() {
   doc["now"] = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String();
   doc["rssi"] = WiFi.RSSI();
   doc["ip"] = WiFi.localIP().toString();
+  if (!failedSsid_.isEmpty()) {
+    doc["failed"] = failedSsid_;
+    doc["reason"] = failedReason_;
+  }
   JsonArray known = doc["known"].to<JsonArray>();
   for (const Network& n : networks_) {
     JsonObject o = known.add<JsonObject>();
     o["ssid"] = n.ssid;
     o["home"] = n.ssid == home_;
+    o["has_password"] = !n.pass.isEmpty();  // whether, never what
   }
   JsonArray seen = doc["seen"].to<JsonArray>();
   for (const Seen& s : seen_) {
     JsonObject o = seen.add<JsonObject>();
     o["ssid"] = s.ssid;
     o["rssi"] = s.rssi;
-    o["open"] = s.open;
+    o["open"] = s.auth == WIFI_AUTH_OPEN;
+    o["auth"] = s.auth;
   }
   String out;
   serializeJson(doc, out);
   sendJson(out);
+}
+
+String Link::wifiLine() const {
+  if (WiFi.status() != WL_CONNECTED) return F("Looking for WiFi");
+  return WiFi.SSID() + F(": looking for the brain");
 }
 
 void Link::printWifi() const {
@@ -254,10 +297,10 @@ bool Link::handleWifiMessage(const char* type, JsonDocument& doc, uint32_t nowMs
     auto n = std::find_if(networks_.begin() + 1, networks_.end(), [&](const Network& x) { return x.ssid == ssid; });
     if (n != networks_.end()) networks_.erase(n);
     if (last_ == ssid) last_ = home_;
+    if (savedLast_ == ssid) savedLast_ = home_;
     saveNetworks();
   } else if (!strcmp(type, "wifi_use") && knows(ssid)) {
     last_ = ssid;
-    saveNetworks();
     switchWanted_ = true;  // from update(), not from inside the socket's own callback
   }
   sendWifi();
@@ -297,7 +340,10 @@ void Link::update(uint32_t nowMs) {
   if (!wifiUp) {
     if (joining_) {
       if (nowMs - joinAtMs_ >= JOIN_MS) {
-        Serial.printf("wifi: couldn't join (status %d)\n", static_cast<int>(WiFi.status()));
+        failedSsid_ = joiningSsid_;
+        failedReason_ = lastReason_;
+        Serial.printf("wifi: couldn't join \"%s\" (status %d, reason %d)\n", failedSsid_.c_str(),
+                      static_cast<int>(WiFi.status()), failedReason_);
         WiFi.disconnect();
         joinNext(nowMs);
       }
@@ -324,7 +370,18 @@ void Link::update(uint32_t nowMs) {
     }
   }
 
-  if (!connected_) findBrain(nowMs);
+  if (connected_) {
+    triedNoBrain_.clear();
+    brainWaitMs_ = BRAIN_WAIT_MS;
+  } else {
+    findBrain(nowMs);
+    if (!scanning_ && static_cast<int32_t>(nowMs - noBrainSinceMs_) >= static_cast<int32_t>(brainWaitMs_)) {
+      noBrainSinceMs_ = nowMs;
+      movingOn_ = true;
+      startScan(nowMs);
+      movingOn_ = scanning_;
+    }
+  }
   if (!brainStarted_) return;
 
   // Each ws_.loop() reads at most one message. While a reply streams in (ten
@@ -399,6 +456,10 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
     case WStype_CONNECTED: {
       connected_ = true;
       Serial.println(F("brain: connected"));
+      if (here_ != savedLast_) {
+        savedLast_ = here_;
+        saveNetworks();
+      }
       JsonDocument doc;
       doc["type"] = "hello";
       doc["who"] = "desk-robot";
@@ -420,6 +481,7 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
         Serial.println(F("brain: disconnected, will retry"));
         if (onState_) onState_(false);
         brainSinceMs_ = millis();  // it may only be restarting: give it its chance again
+        noBrainSinceMs_ = millis();
       }
       connected_ = false;
       break;

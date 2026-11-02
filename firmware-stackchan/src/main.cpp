@@ -856,6 +856,29 @@ void updatePower(uint32_t now) {
   }
 }
 
+// With no brain, a line along the bottom of the screen says which network it's on: nothing else can.
+String wifiLineShown;
+void updateWifiLine(uint32_t now) {
+  const int h = 22;
+  String line;
+  if (!brainLink.connected() && !deepSleep && orphanSinceMs && msSince(now, orphanSinceMs) >= 5000) {
+    line = brainLink.wifiLine();
+  }
+  if (line == wifiLineShown) return;
+  wifiLineShown = line;
+  M5.Display.fillRect(0, M5.Display.height() - h, M5.Display.width(), h, TFT_BLACK);
+  if (!line.isEmpty()) {
+    M5.Display.setFont(&fonts::FreeSans9pt7b);
+    M5.Display.setTextDatum(middle_center);
+    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+    M5.Display.drawString(line, M5.Display.width() / 2, M5.Display.height() - h / 2);
+  } else if (shown == Shown::Clock) {
+    clockScreen.draw(now, true);  // the line may have been over the weather
+  } else if (shown == Shown::Game) {
+    clockScreen.drawStrips(now, true, gfx.bandY(), gfx.bandY() + gfx.height());
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   // Drop console output rather than wait when USB is plugged into a computer
@@ -913,7 +936,7 @@ void setup() {
   face.setIdle(true);
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.16 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.20 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN
@@ -1100,6 +1123,7 @@ void loop() {
       updateStatus();
     }
     if (want != shown) {
+      wifiLineShown = "";  // drawn over: again below
       Shown was = shown;
       shown = want;
       if (was == Shown::Game) face.restoreInks();
@@ -1143,6 +1167,7 @@ void loop() {
       if (shown == Shown::Roam) roamUpdate(now);
       face.update(now);  // screen off in deep sleep: nothing to draw
     }
+    updateWifiLine(now);
     diag.face = max(diag.face, micros() - tf);
     uint32_t tn = micros();
     panNeck.update(now);

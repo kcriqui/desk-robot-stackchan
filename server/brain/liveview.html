@@ -431,6 +431,7 @@
     <div class="settings" style="margin-top:18px">
       <section class="card" aria-labelledby="l-wifi">
         <h2 class="label" id="l-wifi"><span>WiFi</span><span class="sub" id="wifinow">robot not connected</span></h2>
+        <p class="hint" id="wifierror" role="alert" hidden style="color:var(--bad,#c0392b)"></p>
         <div id="wifiknown"></div>
         <form id="wifiform" autocomplete="off" style="margin-top:12px">
           <input id="wifissid" maxlength="32" placeholder="Network name" aria-label="network name" autocomplete="off">
@@ -439,7 +440,7 @@
           <button type="button" id="wifiscan">Scan</button>
         </form>
         <div id="wifiseen" style="margin-top:8px"></div>
-        <p class="hint">It joins whichever of these it can see, on its own. A scan interrupts its WiFi for a few seconds. On a new network the robot has to reach this computer: keep your phone's hotspot on this list, so you can always add the next one from there. Only 2.4 GHz works, and conference WiFi usually won't.</p>
+        <p class="hint">It joins whichever of these it can see, on its own. A network this computer has joined can be added without typing its password. A scan interrupts its WiFi for a few seconds. On a new network the robot has to reach this computer: keep your phone's hotspot on this list, so you can always add the next one from there. Only 2.4 GHz works, and conference WiFi usually won't.</p>
       </section>
       <section class="card" aria-labelledby="l-tune">
         <h2 class="label" id="l-tune"><span>Listening</span><span class="sub">applies now · kept</span></h2>
@@ -1175,17 +1176,19 @@
 
   // ── WiFi ───────────────────────────────────────────────────────────────
   let wifiShown = "";
-  function showWifi(w) {
-    const text = JSON.stringify(w || null);
+  function showWifi(w, saved) {
+    const text = JSON.stringify([w || null, saved || []]);
     if (text === wifiShown) return;
     wifiShown = text;
     $("wifinow").textContent = !w ? "robot not connected" : `on ${w.now || "?"} · ${w.ip} · ${w.rssi} dBm`;
+    $("wifierror").hidden = !(w && w.failed_why);
+    $("wifierror").textContent = (w && w.failed_why) || "";
     const box = $("wifiknown"); box.textContent = "";
     for (const n of (w && w.known) || []) {
       const row = document.createElement("div");
       row.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:6px";
       const name = document.createElement("span"); name.style.flex = "1";
-      name.textContent = n.ssid + (n.ssid === w.now ? " (in use)" : "");
+      name.textContent = n.ssid + (n.ssid === w.now ? " (in use)" : "") + (n.has_password === false ? " (no password saved)" : "");
       row.append(name);
       if (n.ssid !== w.now) {
         const use = document.createElement("button"); use.type = "button"; use.textContent = "Use";
@@ -1203,22 +1206,38 @@
       box.append(row);
     }
     const seen = $("wifiseen"); seen.textContent = "";
-    const known = new Set(((w && w.known) || []).map(n => n.ssid));
+    const known = new Set(((w && w.known) || []).filter(n => n.has_password !== false).map(n => n.ssid));
+    const here = new Set(saved || []);
     for (const s of [...((w && w.seen) || [])].sort((a, b) => b.rssi - a.rssi)) {  // strongest first
       const row = document.createElement("button"); row.type = "button";
       row.style.cssText = "display:flex;justify-content:space-between;gap:12px;width:100%;margin-top:4px;text-align:left";
-      const name = document.createElement("span"); name.textContent = s.ssid + (known.has(s.ssid) ? " (known)" : "");
-      const signal = document.createElement("span"); signal.textContent = `${s.rssi} dBm${s.open ? ", open" : ""}`;
+      const useSaved = here.has(s.ssid) && !known.has(s.ssid);
+      const name = document.createElement("span");
+      name.textContent = s.ssid + (known.has(s.ssid) ? " (known)" : useSaved ? " (saved on this computer: click to add)" : "");
+      const security = { 0: "open", 1: "WEP", 2: "WPA", 3: "WPA2", 4: "WPA/WPA2", 5: "Enterprise", 6: "WPA3", 7: "WPA2/WPA3" }[s.auth];
+      const signal = document.createElement("span"); signal.textContent = `${s.rssi} dBm${security ? ", " + security : ""}`;
       row.append(name, signal);
-      row.onclick = () => { $("wifissid").value = s.ssid; $("wifipass").focus(); };
+      row.onclick = () => {
+        if (useSaved) { act("wifi", { op: "add_saved", ssid: s.ssid }, "Added with this computer's password"); return; }
+        $("wifissid").value = s.ssid; $("wifipass").focus();
+      };
       seen.append(row);
     }
   }
   $("wifiscan").onclick = () => act("wifi", { op: "scan" }, "Scanning");
   $("wifiform").onsubmit = async ev => {
     ev.preventDefault();
+    const ssid = $("wifissid").value.trim();
+    const found = ((status.wifi && status.wifi.seen) || []).find(s => s.ssid === ssid);
+    if (!$("wifipass").value && (status.wifi_saved || []).includes(ssid)) {
+      await act("wifi", { op: "add_saved", ssid }, "Added with this computer's password");
+      $("wifissid").value = "";
+      return;
+    }
+    if (!$("wifipass").value && !(found && found.open) &&
+        !confirm(`Add ${ssid} with no password? Only an open network works that way.`)) return;
     try {
-      await api("wifi", { op: "add", ssid: $("wifissid").value.trim(), password: $("wifipass").value });
+      await api("wifi", { op: "add", ssid, password: $("wifipass").value });
       $("wifissid").value = ""; $("wifipass").value = "";
       toast("Added");
     } catch (e) { toast(e.message, true); }
@@ -1239,7 +1258,7 @@
         }
       }
       status = s;
-      showWifi(s.wifi);
+      showWifi(s.wifi, s.wifi_saved);
       const linked = !!s.robot;
       $("linkdot").className = "dot" + (linked ? " on" : "");
       const off = !linked && s.powered_off;  // we powered him off, vs. the link just dropped

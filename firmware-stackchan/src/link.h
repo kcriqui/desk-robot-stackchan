@@ -41,6 +41,7 @@ class Link {
 
   bool connected() const { return connected_; }
   void printWifi() const;  // the serial console's `wifi`: names, never passwords
+  String wifiLine() const;  // for the screen while there's no brain: which network, or none
   static const char* bootReason();  // why the chip last started, for the hello
 
   // Robot → server. Text is sent as-is (should be JSON).
@@ -55,7 +56,7 @@ class Link {
   void handleMessage(const char* json);
   bool handleWifiMessage(const char* type, JsonDocument& doc, uint32_t nowMs);
   void loadNetworks(const char* homeSsid, const char* homePass);
-  void saveNetworks() const;
+  void saveNetworks();
   bool knows(const String& ssid) const;
   void startScan(uint32_t nowMs);
   void onScanDone(int found, uint32_t nowMs, bool wifiUp);
@@ -71,8 +72,9 @@ class Link {
   struct Seen {
     String ssid;
     int rssi;
-    bool open;
+    int auth;  // wifi_auth_mode_t
   };
+  void moveOn(const std::vector<Seen>& seen, uint32_t nowMs);
 
   WebSocketsClient ws_;
   CommandHandler onCommand_;
@@ -84,6 +86,11 @@ class Link {
   String home_;                    // secrets.h's network: its brain address is secrets.h's too
   String homeBrain_;
   String last_;                    // the network last joined or asked for: tried first when it's there
+  String savedLast_;               // the last one a brain answered on: what a restart tries first
+  std::vector<String> triedNoBrain_;  // networks tried this round with no brain on them
+  uint32_t noBrainSinceMs_ = 0;
+  uint32_t brainWaitMs_ = 0;       // how long to wait for a brain here before moving on
+  bool movingOn_ = false;          // this scan is to find somewhere else to look for a brain
   String here_;                    // the network the brain link belongs to
   String brainHost_;               // "" until one is found on this network
   uint16_t brainPort_ = 0;
@@ -98,6 +105,10 @@ class Link {
   bool switchWanted_ = false;      // the live view chose a network: leave this one
   bool switching_ = false;         // ...and this drop is that, so look around at once
   uint32_t joinAtMs_ = 0;
+  String joiningSsid_;            // the network being tried
+  String failedSsid_;              // the last one that couldn't be joined, for the live view
+  int failedReason_ = 0;           // ...and the WiFi driver's reason
+  volatile int lastReason_ = 0;    // the driver's last disconnect reason (set from its event task)
   uint32_t nextScanMs_ = 0;
   const char* token_ = "";
   bool connected_ = false;
