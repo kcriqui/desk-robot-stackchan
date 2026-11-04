@@ -96,6 +96,7 @@ void printDiag(uint32_t nowMs) {
                 diag.loop / 1000, diag.link / 1000, diag.send / 1000, diag.face / 1000, diag.neck / 1000,
                 (captured - lastCaptured) / 5.0f, encAvg, encMax, diag.framesSent / 5.0f, WiFi.RSSI(),
                 brainLink.connected() ? "brain up" : "brain DOWN", static_cast<unsigned long>(touch.faintCount()));
+  brainLink.printState();
   lastCaptured = captured;
   diag = Diag{};
 }
@@ -936,7 +937,7 @@ void setup() {
   face.setIdle(true);
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.21 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.23 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN

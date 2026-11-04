@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "0.6.10.21";
+static const char* FW_VERSION = "0.6.10.23";
 
 static const size_t MAX_NETWORKS = 30;  // worst case about 3.6 KB of JSON: an NVS string holds 4000 bytes
 static const uint32_t JOIN_MS = 15000;           // give up on a network after this long
@@ -15,6 +15,8 @@ static const uint32_t RESCAN_MS = 3000;          // nothing to join: look again 
 static const uint16_t FINDER_PORT = 8767;        // server/brain/finder.py
 static const uint32_t ASK_MS = 3000;             // how often to ask for a brain while there's none
 static const uint32_t BRAIN_PATIENCE_MS = 12000;  // an address that fails this long gives way to a brain that answered
+static const uint32_t BRAIN_SILENT_MS = 35000;   // connected but nothing heard for this long: the brain is gone
+static const uint32_t BRAIN_MEDIA_MS = 20000;    // nothing heard for this long: stop sending mic and camera to it
 static const uint32_t BRAIN_WAIT_MS = 60000;      // no brain on this network for this long: try another known one
 static const uint32_t BRAIN_WAIT_LONG_MS = 300000;  // tried them all (the brain may just be off): look less often
 
@@ -202,6 +204,16 @@ void Link::onJoined(uint32_t nowMs) {
   if (ssid == here_) return;  // back on the same network: the link picks up by itself
   here_ = ssid;
   startBrain(ssid == home_ ? homeBrain_ : String(), brainPort_, nowMs);
+}
+
+void Link::printState() const {
+  Serial.printf("link: here \"%s\" last \"%s\" brain \"%s\" started %d up %d ws %d | wifi %d ip %s scan %d join %d "
+                "| no brain %ld s, wait %lu s, tried %u, to try %u\n",
+                here_.c_str(), last_.c_str(), brainHost_.c_str(), brainStarted_, connected_,
+                const_cast<WebSocketsClient&>(ws_).isConnected(), static_cast<int>(WiFi.status()),
+                WiFi.localIP().toString().c_str(), scanning_, joining_,
+                static_cast<long>(millis() - noBrainSinceMs_) / 1000, static_cast<unsigned long>(brainWaitMs_ / 1000),
+                static_cast<unsigned>(triedNoBrain_.size()), static_cast<unsigned>(toTry_.size()));
 }
 
 void Link::startBrain(const String& host, uint16_t port, uint32_t nowMs) {
@@ -401,6 +413,14 @@ void Link::update(uint32_t nowMs) {
   }
   if (!brainStarted_) return;
 
+  // A brain that vanished without closing (its laptop left the network) leaves writes that block for seconds each,
+  // over and over: the main loop crawled for minutes with no search for another network. Drop it instead.
+  if (connected_ && (sendFailed_ || static_cast<int32_t>(millis() - lastHeardMs_) >= static_cast<int32_t>(BRAIN_SILENT_MS))) {
+    Serial.printf("brain: %s, dropping the link\n", sendFailed_ ? "a send failed" : "silent");
+    ws_.disconnect();
+    connected_ = false;  // in case the library had already seen it go
+  }
+
   // Each ws_.loop() reads at most one message. While a reply streams in (ten
   // audio messages a second, plus heartbeat replies), one read per pass of
   // loop() falls behind as soon as a pass also sends a camera frame: gaps in
@@ -442,19 +462,20 @@ void Link::sendNote(const char* text) {
 }
 
 void Link::sendJson(const String& json) {
-  if (!connected_) return;
-  ws_.sendTXT(json.c_str(), json.length());
+  if (!connected_ || sendFailed_) return;
+  if (!ws_.sendTXT(json.c_str(), json.length())) sendFailed_ = true;
 }
 
 void Link::sendBinary(uint8_t type, const uint8_t* data, size_t len) {
-  if (!connected_) return;
+  if (!connected_ || sendFailed_) return;
+  if (static_cast<int32_t>(millis() - lastHeardMs_) >= static_cast<int32_t>(BRAIN_MEDIA_MS)) return;
   static uint8_t* buf = nullptr;
   static const size_t CAP = 64 * 1024;  // mic frames are ~1 KB, JPEGs ~10-20 KB
   if (buf == nullptr) buf = static_cast<uint8_t*>(ps_malloc(CAP));
   if (buf == nullptr || len > CAP - 1) return;
   buf[0] = type;
   memcpy(buf + 1, data, len);
-  ws_.sendBIN(buf, len + 1);
+  if (!ws_.sendBIN(buf, len + 1)) sendFailed_ = true;
 }
 
 void Link::sendState(float panDeg, const char* emotion) {
@@ -472,6 +493,8 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED: {
       connected_ = true;
+      sendFailed_ = false;
+      lastHeardMs_ = millis();
       Serial.println(F("brain: connected"));
       if (here_ != savedLast_ && autoJoins(here_)) {
         savedLast_ = here_;
@@ -502,13 +525,19 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
       }
       connected_ = false;
       break;
+    case WStype_PING:
+    case WStype_PONG:
+      lastHeardMs_ = millis();
+      break;
     case WStype_TEXT: {
+      lastHeardMs_ = millis();
       // Copy so we can guarantee a terminator.
       String msg(reinterpret_cast<const char*>(payload), length);
       handleMessage(msg.c_str());
       break;
     }
     case WStype_BIN:
+      lastHeardMs_ = millis();
       if (length > 1 && payload[0] == 0x01 && onAudio_) {
         onAudio_(payload + 1, length - 1);
       }

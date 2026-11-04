@@ -40,6 +40,7 @@ class Link {
   void update(uint32_t nowMs);
 
   bool connected() const { return connected_; }
+  void printState() const;  // for the serial diag: what the link thinks it's doing
   void printWifi() const;  // the serial console's `wifi`: names, never passwords
   String wifiLine() const;  // for the screen while there's no brain: which network, or none
   static const char* bootReason();  // why the chip last started, for the hello
@@ -114,6 +115,8 @@ class Link {
   uint32_t nextScanMs_ = 0;
   const char* token_ = "";
   bool connected_ = false;
+  bool sendFailed_ = false;
+  uint32_t lastHeardMs_ = 0;  // anything from the brain, heartbeat replies included
   bool wifiReported_ = false;
   uint32_t lastTxCheckMs_ = 0;    // transmit power: last look at the signal
   bool lowTxPower_ = false;       // turned down because the router is close

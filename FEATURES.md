@@ -112,6 +112,7 @@ you said. Anything else goes to the language model, which can do the same things
   no brain its screen shows which network it's on.
   A network the brain's computer has already joined can be added with that computer's saved password, without
   typing it.
+  If the brain's computer vanishes without closing the link, it notices within seconds to about half a minute and moves on.
 - **Settings**: your name, awake time, volume, body language, the hand-over-sensor stop, power bank, the
   default personality and face pack, clock and weather, screen brightness and night mode, the idle screen,
   the light bars, wake words and engine, listening thresholds and speaker tone. Changes apply at once and are
