@@ -437,10 +437,11 @@
           <input id="wifissid" maxlength="32" placeholder="Network name" aria-label="network name" autocomplete="off">
           <input id="wifipass" type="password" maxlength="63" placeholder="Password" aria-label="password" autocomplete="new-password">
           <button type="submit">Add</button>
+          <label class="hint" style="display:inline-flex;gap:4px;align-items:center"><input id="wifiauto" type="checkbox" checked>Autoconnect</label>
           <button type="button" id="wifiscan">Scan</button>
         </form>
         <div id="wifiseen" style="margin-top:8px"></div>
-        <p class="hint">It joins whichever of these it can see, on its own. A network this computer has joined can be added without typing its password. A scan interrupts its WiFi for a few seconds. On a new network the robot has to reach this computer: keep your phone's hotspot on this list, so you can always add the next one from there. Only 2.4 GHz works, and conference WiFi usually won't.</p>
+        <p class="hint">It autoconnects to the ticked ones it can see. The others stay saved until you click Use, and a restart leaves them. A network this computer has joined can be added without typing its password. A scan interrupts its WiFi for a few seconds. On a new network the robot has to reach this computer: keep your phone's hotspot on this list, so you can always add the next one from there. Only 2.4 GHz works, and conference WiFi usually won't.</p>
       </section>
       <section class="card" aria-labelledby="l-tune">
         <h2 class="label" id="l-tune"><span>Listening</span><span class="sub">applies now · kept</span></h2>
@@ -1190,6 +1191,14 @@
       const name = document.createElement("span"); name.style.flex = "1";
       name.textContent = n.ssid + (n.ssid === w.now ? " (in use)" : "") + (n.has_password === false ? " (no password saved)" : "");
       row.append(name);
+      if (!n.home && n.auto !== undefined) {
+        const label = document.createElement("label");
+        label.style.cssText = "display:inline-flex;gap:4px;align-items:center";
+        const tick = document.createElement("input"); tick.type = "checkbox"; tick.checked = n.auto;
+        tick.onchange = () => act("wifi", { op: "auto", ssid: n.ssid, auto: tick.checked }, tick.checked ? "Autoconnects" : "Only when you click Use");
+        label.append(tick, "Autoconnect");
+        row.append(label);
+      }
       if (n.ssid !== w.now) {
         const use = document.createElement("button"); use.type = "button"; use.textContent = "Use";
         use.onclick = () => {
@@ -1230,14 +1239,14 @@
     const ssid = $("wifissid").value.trim();
     const found = ((status.wifi && status.wifi.seen) || []).find(s => s.ssid === ssid);
     if (!$("wifipass").value && (status.wifi_saved || []).includes(ssid)) {
-      await act("wifi", { op: "add_saved", ssid }, "Added with this computer's password");
+      await act("wifi", { op: "add_saved", ssid, auto: $("wifiauto").checked }, "Added with this computer's password");
       $("wifissid").value = "";
       return;
     }
     if (!$("wifipass").value && !(found && found.open) &&
         !confirm(`Add ${ssid} with no password? Only an open network works that way.`)) return;
     try {
-      await api("wifi", { op: "add", ssid, password: $("wifipass").value });
+      await api("wifi", { op: "add", ssid, password: $("wifipass").value, auto: $("wifiauto").checked });
       $("wifissid").value = ""; $("wifipass").value = "";
       toast("Added");
     } catch (e) { toast(e.message, true); }

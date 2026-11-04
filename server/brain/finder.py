@@ -52,12 +52,22 @@ def wifi_message(payload: dict) -> dict:
         raise ValueError("a network's name is 1 to 32 characters")
     if op in ("use", "forget"):
         return {"type": f"wifi_{op}", "ssid": ssid}
+    join = payload.get("auto")
+    if join is not None and not isinstance(join, bool):
+        raise ValueError("auto: true or false")
+    if op == "auto":
+        if join is None:
+            raise ValueError("auto: true or false")
+        return {"type": "wifi_auto", "ssid": ssid, "on": join}
     if op != "add":
-        raise ValueError("op: scan, add, use or forget")
+        raise ValueError("op: scan, add, auto, use or forget")
     password = payload.get("password", "")
     if not isinstance(password, str) or (password and not 8 <= len(password.encode()) <= 63):
         raise ValueError("a WiFi password is 8 to 63 characters (empty for an open network)")
-    return {"type": "wifi_add", "ssid": ssid, "password": password}
+    message = {"type": "wifi_add", "ssid": ssid, "password": password}
+    if join is not None:
+        message["auto"] = join
+    return message
 
 
 def _run(args: list[str]) -> str:
@@ -121,14 +131,14 @@ def saved_password(ssid: str) -> str | None:
     return None
 
 
-def saved_message(ssid: object) -> dict:
+def saved_message(ssid: object, join: object = None) -> dict:
     """wifi_message's "add", with the password this computer saved. Runs system tools: not on the event loop."""
     if not isinstance(ssid, str) or not ssid:
         raise ValueError("a network's name is 1 to 32 characters")
     password = saved_password(ssid)
     if password is None:
         raise ValueError(f"this computer has no saved password it can read for {ssid[:32]}")
-    return wifi_message({"op": "add", "ssid": ssid, "password": password})
+    return wifi_message({"op": "add", "ssid": ssid, "password": password, "auto": join})
 
 
 def serve(ws_port: int) -> None:

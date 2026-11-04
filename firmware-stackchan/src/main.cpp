@@ -936,7 +936,7 @@ void setup() {
   face.setIdle(true);
   nextDemoEmotionMs = millis() + 8000;
 
-  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.20 — hello!"));
+  Serial.println(F("\ndesk-robot (StackChan) v0.6.10.21 — hello!"));
   printHelp();
 
 #if HAVE_BRAIN

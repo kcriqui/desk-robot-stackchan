@@ -52,7 +52,7 @@ head really was instead of guessing, so it needn't wait for the head to
 settle. The server takes either type.
 
 Also from the robot, 0.6.10.16+: `{"type": "wifi", "now": ssid, "rssi": n, "ip": "...", "known": [{"ssid": "...",
-"home": bool, "has_password": bool}], "seen": [{"ssid": "...", "rssi": n, "open": bool, "auth": wifi_auth_mode_t}], "failed": ssid, "reason": n}` (the last two only after a failed join) after the hello and after each `wifi_*` message
+"home": bool, "has_password": bool, "auto": bool}], "seen": [{"ssid": "...", "rssi": n, "open": bool, "auth": wifi_auth_mode_t}], "failed": ssid, "reason": n}` (the last two only after a failed join) after the hello and after each `wifi_*` message
 below. It never includes a password.
 
 ## Finding the brain
@@ -63,8 +63,9 @@ On a network with no address in its firmware, or when that address stops answeri
 ## Server → robot
 
 0.6.10.16+, from the live view's WiFi card (`add_saved` there becomes `wifi_add`, with the password the computer saved): `{"type": "wifi_scan"}`, `{"type": "wifi_add", "ssid": "...", "password":
-"..."}`, `{"type": "wifi_use", "ssid": "..."}` (move there now, and prefer it from now on), `{"type": "wifi_forget",
-"ssid": "..."}`.
+"..."}`, `{"type": "wifi_use", "ssid": "..."}` (move there now, and prefer it from now on if it autoconnects), `{"type": "wifi_forget",
+"ssid": "..."}`. 0.6.10.21+: `wifi_add` takes an optional `"auto": bool` (default true), and `{"type": "wifi_auto",
+"ssid": "...", "on": bool}` says whether the robot autoconnects to that network. Off, it joins only on `wifi_use`.
 
 
 ```json

@@ -36,6 +36,16 @@ class WifiMessageTests(unittest.TestCase):
         self.assertEqual(finder.wifi_message({"op": "use", "ssid": "Home"}), {"type": "wifi_use", "ssid": "Home"})
         self.assertEqual(finder.wifi_message({"op": "forget", "ssid": "Home"}), {"type": "wifi_forget", "ssid": "Home"})
 
+    def test_auto_join(self):
+        self.assertEqual(finder.wifi_message({"op": "auto", "ssid": "Home", "auto": False}),
+                         {"type": "wifi_auto", "ssid": "Home", "on": False})
+        self.assertIs(finder.wifi_message({"op": "add", "ssid": "Cafe", "auto": False})["auto"], False)
+        self.assertNotIn("auto", finder.wifi_message({"op": "add", "ssid": "Cafe"}))
+        for bad in ({"op": "auto", "ssid": "Home"}, {"op": "auto", "ssid": "Home", "auto": "no"},
+                    {"op": "add", "ssid": "Home", "auto": 0}):
+            with self.assertRaises(ValueError):
+                finder.wifi_message(bad)
+
     def test_open_network_has_no_password(self):
         self.assertEqual(finder.wifi_message({"op": "add", "ssid": "Cafe"})["password"], "")
 

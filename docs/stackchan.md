@@ -88,9 +88,10 @@ same folder. Fill in your WiFi, the computer's address, and the same
 `wifi: connected` and then `brain: connected`.
 
 To take it somewhere else, add the network in the live view (Settings, WiFi)
-while it's still connected. It keeps up to 8 in flash, scans at power-on and
-joins the last one that had a brain if it's there, or else the strongest. With
-no brain for a minute it tries its other known networks, each once a round, and
+while it's still connected. It keeps up to 30 in flash, each either autoconnecting
+or only when you click Use. It scans at power-on and joins the last
+autoconnect one that had a brain if it's there, or else the strongest. With
+no brain for a minute it tries its other autoconnect networks, each once a round, and
 says on its screen which network it's on. Away from the
 network in `secrets.h`, it broadcasts `rockybrain?` on UDP port 8767 and
 connects to whichever brain answers, so the brain's computer must be on the

@@ -1416,7 +1416,7 @@ async def _console_command(action: str, payload: dict) -> dict:
         await send_to_robot({"type": "emotion", "name": name})
     elif action == "wifi":
         if payload.get("op") == "add_saved":
-            message = await asyncio.to_thread(finder.saved_message, payload.get("ssid"))
+            message = await asyncio.to_thread(finder.saved_message, payload.get("ssid"), payload.get("auto"))
         else:
             message = finder.wifi_message(payload)
         if not await send_to_robot(message):

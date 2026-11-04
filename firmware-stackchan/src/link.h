@@ -57,6 +57,7 @@ class Link {
   bool handleWifiMessage(const char* type, JsonDocument& doc, uint32_t nowMs);
   void loadNetworks(const char* homeSsid, const char* homePass);
   void saveNetworks();
+  bool autoJoins(const String& ssid) const;
   bool knows(const String& ssid) const;
   void startScan(uint32_t nowMs);
   void onScanDone(int found, uint32_t nowMs, bool wifiUp);
@@ -68,6 +69,7 @@ class Link {
 
   struct Network {
     String ssid, pass;
+    bool autoJoin = true;  // false: remembered, joined only when asked (wifi_use)
   };
   struct Seen {
     String ssid;

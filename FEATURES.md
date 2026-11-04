@@ -104,7 +104,8 @@ you said. Anything else goes to the language model, which can do the same things
   off, and a console.
 - **Personalities**: make, edit, test, import, export and switch them.
 - **Memories**: what it remembers, by person; add, edit and forget.
-- **WiFi** (in Settings): the networks it knows; scan, add, use and forget them. It joins whichever it can see,
+- **WiFi** (in Settings): the networks it knows, up to 30; scan, add, use and forget them. Each can be ticked to autoconnect
+  or kept for when you click Use, like a computer's saved networks. It autoconnects to the ticked ones it can see,
   and finds the brain by itself on any network that lets devices see each other, so it travels: home, a
   friend's WiFi, a phone's hotspot. If it can't join one it goes back to one it can, and the card says why. If it joins one with no brain on it,
   it tries its other known networks after a minute, and a restart returns to the last one that had a brain. With

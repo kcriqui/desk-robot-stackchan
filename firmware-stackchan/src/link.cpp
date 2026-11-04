@@ -6,9 +6,9 @@
 #include <algorithm>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "0.6.10.20";
+static const char* FW_VERSION = "0.6.10.21";
 
-static const size_t MAX_NETWORKS = 8;
+static const size_t MAX_NETWORKS = 30;  // worst case about 3.6 KB of JSON: an NVS string holds 4000 bytes
 static const uint32_t JOIN_MS = 15000;           // give up on a network after this long
 static const uint32_t REJOIN_MS = 20000;         // after a drop, how long the WiFi stack gets to rejoin by itself
 static const uint32_t RESCAN_MS = 3000;          // nothing to join: look again (a hotspot just turned on)
@@ -59,10 +59,11 @@ void Link::loadNetworks(const char* homeSsid, const char* homePass) {
     for (JsonObject n : doc.as<JsonArray>()) {
       String ssid = n["s"] | "";
       if (!ssid.isEmpty() && !knows(ssid) && networks_.size() < MAX_NETWORKS) {
-        networks_.push_back({ssid, String(n["p"] | "")});
+        networks_.push_back({ssid, String(n["p"] | ""), n["a"] | true});
       }
     }
   }
+  if (!autoJoins(last_)) last_ = home_;  // turned off since: a restart only returns to one it may join by itself
 }
 
 // Everything but the first: that one comes from secrets.h.
@@ -73,12 +74,13 @@ void Link::saveNetworks() {
     JsonObject n = list.add<JsonObject>();
     n["s"] = networks_[i].ssid;
     n["p"] = networks_[i].pass;
+    if (!networks_[i].autoJoin) n["a"] = false;
   }
   String out;
   serializeJson(doc, out);
   Preferences p;
   p.begin("wifi", false);
-  p.putString("list", out);
+  if (p.putString("list", out) == 0) sendNote("wifi: couldn't save the list of networks");
   p.putString("last", savedLast_);
   p.end();
 }
@@ -86,6 +88,13 @@ void Link::saveNetworks() {
 bool Link::knows(const String& ssid) const {
   for (const Network& n : networks_) {
     if (n.ssid == ssid) return true;
+  }
+  return false;
+}
+
+bool Link::autoJoins(const String& ssid) const {
+  for (const Network& n : networks_) {
+    if (n.ssid == ssid) return n.autoJoin;
   }
   return false;
 }
@@ -121,10 +130,11 @@ void Link::onScanDone(int found, uint32_t nowMs, bool wifiUp) {
     return;
   }
 
-  // The last one used first, so a choice made in the live view sticks while that network is there; then by signal.
+  // The last one used first, so a choice made in the live view sticks while that network is there, even one it
+  // wouldn't join by itself; then the ones it may join by itself, by signal.
   toTry_.clear();
   for (const Seen& s : seen) {
-    if (knows(s.ssid) && s.ssid != last_) toTry_.push_back(s.ssid);
+    if (autoJoins(s.ssid) && s.ssid != last_) toTry_.push_back(s.ssid);
   }
   bool lastInSight = std::any_of(seen.begin(), seen.end(), [&](const Seen& s) { return s.ssid == last_; });
   if (lastInSight && knows(last_)) toTry_.insert(toTry_.begin(), last_);
@@ -143,7 +153,7 @@ void Link::moveOn(const std::vector<Seen>& seen, uint32_t nowMs) {
     triedNoBrain_.push_back(here_);
   }
   for (const Seen& s : seen) {
-    if (!knows(s.ssid) || std::find(triedNoBrain_.begin(), triedNoBrain_.end(), s.ssid) != triedNoBrain_.end()) continue;
+    if (!autoJoins(s.ssid) || std::find(triedNoBrain_.begin(), triedNoBrain_.end(), s.ssid) != triedNoBrain_.end()) continue;
     Serial.printf("wifi: no brain on \"%s\", trying \"%s\"\n", here_.c_str(), s.ssid.c_str());
     triedNoBrain_.push_back(s.ssid);
     toTry_ = {s.ssid, here_};
@@ -245,6 +255,7 @@ void Link::sendWifi() {
     o["ssid"] = n.ssid;
     o["home"] = n.ssid == home_;
     o["has_password"] = !n.pass.isEmpty();  // whether, never what
+    o["auto"] = n.autoJoin;
   }
   JsonArray seen = doc["seen"].to<JsonArray>();
   for (const Seen& s : seen_) {
@@ -286,10 +297,11 @@ bool Link::handleWifiMessage(const char* type, JsonDocument& doc, uint32_t nowMs
     auto n = std::find_if(networks_.begin(), networks_.end(), [&](const Network& x) { return x.ssid == ssid; });
     if (n != networks_.end() && n != networks_.begin()) {
       n->pass = pass;
+      if (doc["auto"].is<bool>()) n->autoJoin = doc["auto"].as<bool>();
     } else if (n == networks_.end() && networks_.size() < MAX_NETWORKS) {
-      networks_.push_back({ssid, pass});
+      networks_.push_back({ssid, pass, doc["auto"] | true});
     } else {
-      sendNote(n == networks_.end() ? "wifi: already knows 8 networks, forget one first"
+      sendNote(n == networks_.end() ? "wifi: already knows 30 networks, forget one first"
                                     : "wifi: that network's password is in secrets.h");
     }
     saveNetworks();
@@ -298,6 +310,11 @@ bool Link::handleWifiMessage(const char* type, JsonDocument& doc, uint32_t nowMs
     if (n != networks_.end()) networks_.erase(n);
     if (last_ == ssid) last_ = home_;
     if (savedLast_ == ssid) savedLast_ = home_;
+    saveNetworks();
+  } else if (!strcmp(type, "wifi_auto") && !ssid.isEmpty()) {
+    auto n = std::find_if(networks_.begin() + 1, networks_.end(), [&](const Network& x) { return x.ssid == ssid; });
+    if (n != networks_.end()) n->autoJoin = doc["on"] | true;
+    if (savedLast_ == ssid && !autoJoins(ssid)) savedLast_ = home_;
     saveNetworks();
   } else if (!strcmp(type, "wifi_use") && knows(ssid)) {
     last_ = ssid;
@@ -456,7 +473,7 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
     case WStype_CONNECTED: {
       connected_ = true;
       Serial.println(F("brain: connected"));
-      if (here_ != savedLast_) {
+      if (here_ != savedLast_ && autoJoins(here_)) {
         savedLast_ = here_;
         saveNetworks();
       }
