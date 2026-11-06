@@ -279,7 +279,7 @@ RECORD_DIR = os.environ.get("RECORD_DIR", str(Path(__file__).resolve().parent.pa
 # Everything the brain prints, timestamped, is also kept in server/data/logs, a file a day, this many days.
 LOG_DAYS = int(os.environ.get("LOG_DAYS", "14"))
 RECORD_UTTERANCES = os.environ.get("RECORD_UTTERANCES", "1") not in ("", "0")
-RECORD_KEEP = 2000
+RECORD_KEEP = 20000
 # Speech-to-text engine. STT_ENGINE in server/.env:
 #   parakeet   NVIDIA Parakeet TDT 0.6B on the CPU (brain/parakeet.py), the
 #              default: the fewest errors of five engines on the user's test
@@ -310,6 +310,23 @@ STT_REVISION = "3d3d5dee26484f91867d81cb899cfcf72b96be6c"
 STT_THREADS = int(os.environ.get("STT_THREADS", "8"))  # CPU threads for transcription
                          # (0 = library default of 4); STT_THREADS in server/.env or the
                          # environment overrides it, e.g. 4 on a 4-core server
+
+
+def _cpu_list(text: str) -> frozenset[int]:
+    """'0-3,6' -> {0, 1, 2, 3, 6}; '' -> empty."""
+    cpus: set[int] = set()
+    for part in text.replace(" ", "").split(","):
+        if part:
+            lo, _, hi = part.partition("-")
+            cpus.update(range(int(lo), int(hi or lo) + 1))
+    return frozenset(cpus)
+
+
+# CPUs to run Parakeet's transcription on, e.g. "0-3" for the P cores of an Intel hybrid CPU (Linux only; empty =
+# any CPU, the default). On the HP 17's i5-1335U (2 P cores with 2 threads each, 8 E cores), 2 threads on CPUs 0-3
+# took 0.76 s a clip in power-saver against 1.00 s unpinned with 4 threads, and 0.41 against 0.47 s in balanced
+# (2026-11-06; 4 threads on CPUs 0-3 were far slower, the pairs share a core). Only transcription is pinned.
+STT_CPUS = _cpu_list(os.environ.get("STT_CPUS", ""))
 STT_PROMPT = f"Hey {ROBOT_NAME}. {ROBOT_NAME} is a robot."  # name hint for the model
 MIC_SOURCE = os.environ.get("MIC_SOURCE", "auto")
                          # "robot" = only the robot's mic (nothing listens until it connects),

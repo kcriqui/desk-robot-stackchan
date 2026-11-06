@@ -12,6 +12,9 @@ commit and checked against a SHA-256 (turn._fetch), the same files as k2-fsa's a
 
 from __future__ import annotations
 
+import contextlib
+import os
+
 import numpy as np
 
 from . import config
@@ -27,6 +30,24 @@ FILES = {
 }
 
 
+@contextlib.contextmanager
+def _on_stt_cpus():
+    """Run the block with the calling thread on config.STT_CPUS (threads started inside inherit them), then put it
+    back. Does nothing when STT_CPUS is empty, or where the OS can't pin threads (Windows, macOS)."""
+    if not config.STT_CPUS or not hasattr(os, "sched_setaffinity"):
+        yield
+        return
+    before = os.sched_getaffinity(0)
+    wanted = config.STT_CPUS & before
+    if wanted:
+        os.sched_setaffinity(0, wanted)
+    try:
+        yield
+    finally:
+        if wanted:
+            os.sched_setaffinity(0, before)
+
+
 class ParakeetTranscriber:
     """Same interface as ears.Transcriber: transcribe(16 kHz float32) -> text."""
 
@@ -35,9 +56,10 @@ class ParakeetTranscriber:
 
         p = {name: str(_fetch(f"{_BASE_URL}/{name}", f"parakeet-tdt-0.6b-v2-{name}", sha))
              for name, sha in FILES.items()}
-        self.recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-            encoder=p["encoder.int8.onnx"], decoder=p["decoder.int8.onnx"], joiner=p["joiner.int8.onnx"],
-            tokens=p["tokens.txt"], num_threads=config.STT_THREADS or 4, model_type="nemo_transducer")
+        with _on_stt_cpus():  # the model's worker threads start here and keep these CPUs
+            self.recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
+                encoder=p["encoder.int8.onnx"], decoder=p["decoder.int8.onnx"], joiner=p["joiner.int8.onnx"],
+                tokens=p["tokens.txt"], num_threads=config.STT_THREADS or 4, model_type="nemo_transducer")
 
     def transcribe(self, audio: np.ndarray) -> str:
         audio = np.asarray(audio, dtype=np.float32)
@@ -45,5 +67,6 @@ class ParakeetTranscriber:
             return ""
         s = self.recognizer.create_stream()
         s.accept_waveform(16000, audio)
-        self.recognizer.decode_stream(s)
+        with _on_stt_cpus():  # the calling thread does part of the work too
+            self.recognizer.decode_stream(s)
         return s.result.text.strip()
