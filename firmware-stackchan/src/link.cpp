@@ -5,8 +5,9 @@
 #include <WiFi.h>
 #include <algorithm>
 #include <esp_system.h>
+#include <esp_wifi.h>
 
-static const char* FW_VERSION = "0.6.10.23";
+static const char* FW_VERSION = "0.6.10.24";
 
 static const size_t MAX_NETWORKS = 30;  // worst case about 3.6 KB of JSON: an NVS string holds 4000 bytes
 static const uint32_t JOIN_MS = 15000;           // give up on a network after this long
@@ -34,6 +35,9 @@ void Link::begin(const char* ssid, const char* pass, const char* host,
   WiFi.persistent(false);  // the list above is the only copy; don't wear the flash on every join
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);  // lower latency; main.cpp turns power saving on in deep sleep
+  // 802.11b/g only, no n: on crowded conference WiFi at -70 dBm the link held better that way (the Supercon badge,
+  // also an ESP32-S3, 2026-11-07). The robot sends audio and small JPEGs, well within g's rates.
+  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G);
   // Hear every channel before joining, then pick the strongest access point
   // with this name. The default stops at the first one it hears, which with a
   // mesh or a second router can be a far one. (From the original V2.)

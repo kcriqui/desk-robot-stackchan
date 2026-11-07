@@ -99,7 +99,8 @@ connects to whichever brain answers, so the brain's computer must be on the
 same network, which must let devices see each other. Keep a phone's hotspot on
 the list: at a new place the robot and the computer can meet there, and you can
 add the local WiFi from the live view. The ESP32 only sees 2.4 GHz, which on
-an iPhone hotspot means turning on Maximize Compatibility.
+an iPhone hotspot means turning on Maximize Compatibility. It joins in 802.11b/g only (no n), which held up
+better on a crowded conference network.
 
 Optional, in `server/.env`:
 
