@@ -370,6 +370,7 @@ class Ears:
         self.muted = threading.Event()  # set while Rocky is talking (no echo cancel)
         self.source = "mac"             # "mac" or "robot": whose audio is live
         self.level = 0.0                # RMS of the latest live block (for `mic`)
+        self._quiet_levels: deque[tuple[float, float]] = deque(maxlen=2000)  # (time, level) with no speech
         self._blocks: queue.Queue[np.ndarray | None] = queue.Queue()
         self._stream = None
         self._worker: threading.Thread | None = None
@@ -423,6 +424,7 @@ class Ears:
         block = np.frombuffer(pcm16, dtype=np.int16).astype(np.float32) / 32768.0
         block = self._highpass.process(block)
         self.level = float(np.sqrt(np.mean(block * block)))
+        self._note_quiet(self.level)
         self._blocks.put(block)
         self._to_spotter(block)
 
@@ -503,8 +505,22 @@ class Ears:
         if self.source == "mac" and not self.muted.is_set():
             block = np.clip(indata.sum(axis=1), -1.0, 1.0)
             self.level = float(np.sqrt(np.mean(block * block)))
+            self._note_quiet(self.level)
             self._blocks.put(block)
             self._to_spotter(block)
+
+    def _note_quiet(self, level: float) -> None:
+        if self.speech_prob < 0.3:  # nobody near is talking: the room
+            self._quiet_levels.append((time.time(), level))
+
+    def noise_db(self, seconds: float = 20.0) -> float | None:
+        """The room's noise over the last `seconds`, in dBFS: the 20th percentile of the levels between words (not
+        while it talks: the mic is muted then). None with too little to go on."""
+        since = time.time() - seconds
+        levels = [lv for at, lv in list(self._quiet_levels) if at >= since]
+        if len(levels) < 20:
+            return None
+        return float(20 * np.log10(np.percentile(levels, 20) + 1e-9))
 
     def _run(self) -> None:
         segmenter = self._segmenter

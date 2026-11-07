@@ -38,6 +38,10 @@ class VoicesTests(unittest.TestCase):
         p = mock.patch.object(speakers, "fingerprint", fake_fingerprint)
         p.start()
         self.addCleanup(p.stop)
+        for name, value in (("VOICE_SURE", 0.6), ("VOICE_MAYBE", 0.45)):  # the defaults, whatever this machine's .env says
+            q = mock.patch.object(speakers.config, name, value)
+            q.start()
+            self.addCleanup(q.stop)
         self.v = speakers.Voices(Path(self.dir.name) / "speakers.json")
         self.v.keep("Kevin", [(VECS[KEVIN], 3.0)], "test")
 

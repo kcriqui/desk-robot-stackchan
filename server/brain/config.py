@@ -572,7 +572,34 @@ MEMORY_FILE = Path(os.environ.get("MEMORY_FILE") or Path(__file__).resolve().par
 # Recognising people by voice (speakers.py): the voices learned, and how alike a turn must be to one (cosine
 # similarity, the average voice taken away). Measured through the robot's mic: the owner ~0.8, others ~0.2.
 SPEAKERS_FILE = Path(os.environ.get("SPEAKERS_FILE") or Path(__file__).resolve().parent.parent / "data" / "speakers.json")
-VOICE_SURE = 0.6          # this alike (and VOICE_MARGIN ahead of the next voice): it's them
-VOICE_MAYBE = 0.45        # this alike: probably them
+if not SPEAKERS_FILE.is_absolute():  # relative to server/, like .env
+    SPEAKERS_FILE = Path(__file__).resolve().parent.parent / SPEAKERS_FILE
+VOICE_SURE = float(os.environ.get("VOICE_SURE", "0.6"))    # this alike (and VOICE_MARGIN ahead of the next voice): it's them
+VOICE_MAYBE = float(os.environ.get("VOICE_MAYBE", "0.45"))  # this alike: probably them
+# With a hall's average voice (SPEAKER_BACKGROUND_FILE) scores run lower: the user's turns 0.24-0.55 in the con hall
+# (2026-11-07), so set these lower there (0.4 and 0.25), or it calls its owner a stranger.
 VOICE_MARGIN = 0.1
+# The average voice taken away before comparing (speakers.py). Empty = the one shipped (speaker_background.json, from
+# quiet rooms). In a loud hall every turn looks like the average of the hall: build one there with
+# `python -m brain.speakers background "2026-11-07 09:00" data/speaker_background_here.json`, point this at it, and
+# learn your voice again there. With a hall average from the con, the user's turns scored a median 0.48 and the hall's
+# -0.16; with the shipped one, 0.75 and 0.73 (2026-11-07).
+SPEAKER_BACKGROUND_FILE = os.environ.get("SPEAKER_BACKGROUND_FILE", "").strip()
+if SPEAKER_BACKGROUND_FILE and not Path(SPEAKER_BACKGROUND_FILE).is_absolute():  # relative to server/, like .env
+    SPEAKER_BACKGROUND_FILE = str(Path(__file__).resolve().parent.parent / SPEAKER_BACKGROUND_FILE)
+# A noisy room (settings: "noise"). VOICE_ONLY: while awake, answer only turns in a voice it knows (at least
+# VOICE_ONLY_MIN alike); its name still wakes it for anyone, and a double tap. Turns too short to fingerprint pass if
+# the last one did, a moment ago.
+VOICE_ONLY = os.environ.get("VOICE_ONLY", "") not in ("", "0")
+VOICE_ONLY_MIN = 0.3
+VOICE_ONLY_SHORT_SECONDS = 20.0
+# NAME_ONLY: answer only lines that start with a wake phrase (its name, "hey Rocky", or the shared wake words), awake
+# or not, so nearby conversations never get an answer. While it interviews someone to learn their voice, answers pass.
+NAME_ONLY = os.environ.get("NAME_ONLY", "") not in ("", "0")
+# AUTO_VOLUME: raise the speaker over the room's noise, measured between words through the robot's mic (fixed gain):
+# the set volume at AUTO_VOLUME_QUIET_DB and below, full at AUTO_VOLUME_LOUD_DB and above. Measured 2026-11: about
+# -40 dBFS at home, -30 in the con hall on a calmer day, -25 on a loud one.
+AUTO_VOLUME = os.environ.get("AUTO_VOLUME", "") not in ("", "0")
+AUTO_VOLUME_QUIET_DB = -40.0
+AUTO_VOLUME_LOUD_DB = -25.0
 LEARN_VOICE_SECONDS = 40  # of a person's speech to learn their voice in an interview

@@ -43,6 +43,11 @@ you said. Anything else goes to the language model, which can do the same things
   goes to whoever was just talking if the voice fits.
 - **"Learn Sam's voice"**: it interviews that person with questions until it has about 40 s of their speech
   (5 turns at least). "Forget Sam's voice" removes it.
+- **In a noisy room** (Settings, "In a noisy room"): it can answer only lines that start with its name ("Rocky, ...",
+  "hey Rocky, ..."), awake or not; it can answer only voices it knows while awake (its name and
+  a double tap still wake it for anyone), and turn its speaker up as the room gets louder, from the set volume in a
+  quiet room to full in a loud one. For a hall, it can compare voices against the hall's own average voice, built from
+  recordings there (`python -m brain.speakers background ...`).
 - **"Remember that ..."** / "forget that ...": facts it keeps for good. Each is about one person (whoever is
   talking, unless you say) or everyone, and known by every personality or just the one that heard it ("only
   you"). The live view's Memories tab lists them by person and edits or forgets them.
@@ -131,5 +136,6 @@ you said. Anything else goes to the language model, which can do the same things
 
 ## Updating
 
+- WiFi in 802.11b/g only, which holds better on crowded networks with a weak signal.
 - Firmware updates over WiFi (OTA) or USB; the USB serial console drives the same commands as the brain.
 - Tests for the brain run with no hardware (README.md, "Tests run with no hardware").

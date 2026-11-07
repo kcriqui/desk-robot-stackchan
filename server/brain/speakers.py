@@ -66,7 +66,9 @@ def _model():
 def _average_voice() -> np.ndarray:
     global _background
     if _background is None:
-        bg = json.loads(Path(__file__).with_name("speaker_background.json").read_text(encoding="utf-8"))
+        path = Path(config.SPEAKER_BACKGROUND_FILE) if config.SPEAKER_BACKGROUND_FILE else \
+            Path(__file__).with_name("speaker_background.json")
+        bg = json.loads(path.read_text(encoding="utf-8"))
         _background = np.array(bg["mean"], dtype=np.float32)
     return _background
 
@@ -283,3 +285,39 @@ class Voices:
             return (f" Voice: not a voice you know (you know {', '.join(known)}). If it's someone new, you may ask "
                     "who they are, once; with their OK you can learn their voice (learn_voice).")
         return ""
+
+
+def build_background(since: str, out: str, recordings: str | None = None) -> int:
+    """The average voice of every recorded turn since `since` ("2026-11-07 09:00"), 1 s or longer, written to `out`
+    for config.SPEAKER_BACKGROUND_FILE. Returns how many turns went in."""
+    import wave
+
+    rec = Path(recordings or config.RECORD_DIR)
+    t0 = time.mktime(time.strptime(since, "%Y-%m-%d %H:%M"))
+    embs = []
+    for line in (rec / "index.jsonl").read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        f = rec / str(row.get("file", ""))
+        if row.get("started_at", 0) < t0 or row.get("seconds", 0) < 1.0 or not f.exists():
+            continue
+        with wave.open(str(f)) as w:
+            audio = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
+        embs.append(_unit(raw_embedding(audio[-int(MAX_SECONDS * RATE):])))
+    if not embs:
+        raise ValueError(f"no recordings of 1 s or more since {since}")
+    mean = np.mean(embs, axis=0)
+    Path(out).write_text(json.dumps({"model": MODEL_NAME, "speakers": f"{len(embs)} turns since {since}",
+                                     "mean": [round(float(x), 6) for x in mean]}), encoding="utf-8")
+    return len(embs)
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) == 4 and sys.argv[1] == "background":
+        print(f"{build_background(sys.argv[2], sys.argv[3])} turns averaged into {sys.argv[3]}")
+    else:
+        print('usage: python -m brain.speakers background "YYYY-MM-DD HH:MM" <out.json>')

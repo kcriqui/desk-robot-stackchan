@@ -791,6 +791,14 @@
       ["wake", "spotter", "Keyword spotter too", "opens its eyes mid-sentence; off: on your voice it caught 5 of 14 wake words and misfired on ordinary speech. The transcript wakes it either way", "check"],
       ["wake", "record", "Keep recordings", "every utterance, in server/data/recordings, for tuning the wake words and comparing speech-to-text (kept here only)", "check"],
     ]],
+    ["In a noisy room", "for a hall full of other voices", [
+      ["noise", "name_only", "Answer only lines that start with its name", "\u201cRocky, \u2026\u201d or \u201chey Rocky, \u2026\u201d (or a shared wake word), every time, awake or not; nearby conversations never get an answer", "check"],
+      ["noise", "voice_only", "Answer only voices it knows", "while awake; its name still wakes it for anyone, and so does a double tap. In a loud hall, build a hall average voice and learn your voice there first (config.py, SPEAKER_BACKGROUND_FILE)", "check"],
+      ["noise", "voice_min", "How alike", "0-0.9; raise if others get through, lower if you're ignored", "number"],
+      ["noise", "auto_volume", "Louder in a noisy room", "from the set volume when quiet to full when loud", "check"],
+      ["noise", "quiet_db", "Quiet room at", "dBFS between words; about -40 at home", "number"],
+      ["noise", "loud_db", "Loud room at", "dBFS; about -25 in a busy hall", "number"],
+    ]],
     ["Clock screen", "while it sleeps on USB", [
       ["clock", "h24", "24-hour clock", "", "check"],
       ["clock", "timezone", "Time zone", "", "zone"],

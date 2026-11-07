@@ -63,6 +63,14 @@ SCHEMA: dict[str, dict[str, tuple]] = {
         "TURN_THRESHOLD":   ("TURN_THRESHOLD", "float", (0.1, 0.95)),
         "TURN_MAX_SILENCE": ("TURN_MAX_SILENCE", "float", (0.5, 6.0)),
     },
+    "noise": {
+        "name_only":     ("NAME_ONLY", "bool", None),            # answer only lines that start with its name
+        "voice_only":    ("VOICE_ONLY", "bool", None),           # while awake, answer only voices it knows
+        "voice_min":     ("VOICE_ONLY_MIN", "float", (0.0, 0.9)),
+        "auto_volume":   ("AUTO_VOLUME", "bool", None),          # louder in a noisy room
+        "quiet_db":      ("AUTO_VOLUME_QUIET_DB", "float", (-70.0, -10.0)),
+        "loud_db":       ("AUTO_VOLUME_LOUD_DB", "float", (-60.0, -5.0)),
+    },
     "speaker": {
         "TTS_LEVEL":        ("TTS_LEVEL", "float", (0.08, 0.40)),
         "TTS_HIGHPASS_HZ":  ("TTS_HIGHPASS_HZ", "float", (0.0, 600.0)),

@@ -1355,6 +1355,7 @@ def console_state() -> dict:
         "listening": ears is not None,
         "mic": ears.source if ears is not None else None,
         "level": ears.level if ears is not None else 0.0,
+        "noise_db": ears.noise_db() if ears is not None else None,  # the room between words (AUTO_VOLUME)
         "speech_prob": ears.speech_prob if ears is not None else 0.0,
         "hearing": ears.hearing if ears is not None else False,
         "speaking": ears.muted.is_set() if ears is not None else False,
@@ -2011,6 +2012,53 @@ async def power_off(key: str) -> None:
     awake_until = 0.0  # the goodbye kept him "awake"; he's off
 
 
+voice_ok_at = 0.0  # when the last turn passed the voice filter
+
+
+def _known_voice(started_at: float, ended_at: float, heard_at: float | None) -> bool:
+    """With VOICE_ONLY on: was this turn in a voice it knows? Always True when it's off or knows no voices."""
+    global voice_ok_at
+    if not config.VOICE_ONLY or voices is None or not voices.people():
+        return True
+    g = voices.last
+    now = time.time()
+    fresh = g is not None and g.at >= (heard_at or now) - 5.0  # voices.hear() ran on this turn
+    if not fresh:  # too short to fingerprint ("yes"): fine if the last turn was a known voice, a moment ago
+        ok = now - voice_ok_at < config.VOICE_ONLY_SHORT_SECONDS
+    else:
+        ok = g.score >= config.VOICE_ONLY_MIN  # the best match among the voices it knows
+    if ok:
+        voice_ok_at = now
+    return ok
+
+
+async def volume_loop() -> None:
+    """With AUTO_VOLUME on: the speaker louder in a noisy room. The set volume (Settings) at AUTO_VOLUME_QUIET_DB of
+    noise and below, full at AUTO_VOLUME_LOUD_DB and above, in between in a line. Not saved: the set volume stays."""
+    sent: float | None = None
+    shown_db: float | None = None
+    while True:
+        await asyncio.sleep(3.0)
+        if robot_socket is None or ears is None:
+            sent = None
+            continue
+        target = speaker_volume
+        noise = ears.noise_db() if config.AUTO_VOLUME else None
+        if noise is not None:
+            span = max(1.0, config.AUTO_VOLUME_LOUD_DB - config.AUTO_VOLUME_QUIET_DB)
+            t = min(1.0, max(0.0, (noise - config.AUTO_VOLUME_QUIET_DB) / span))
+            target = round(speaker_volume + (1.0 - speaker_volume) * t, 2)
+        if sent is None or abs(target - sent) >= 0.05 or (target == speaker_volume and sent != speaker_volume):
+            try:
+                await robot_socket.send(json.dumps({"type": "volume", "level": target}))
+            except Exception:
+                continue
+            if noise is not None and (shown_db is None or abs(noise - shown_db) >= 2):
+                print(f"(room noise {noise:.0f} dBFS: volume {target:.2f})")
+                shown_db = noise
+            sent = target
+
+
 async def hearing_loop() -> None:
     """Tell the robot when speech starts and stops (a turn opens and closes), so its face and light bars show
     it's hearing you. Repeated every few seconds while on: the robot drops it if the off goes missing."""
@@ -2133,9 +2181,15 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
     if not woke and started_at >= awake_until:
         print(f"(heard, ignoring: {text})")
         return
+    if not woke and config.NAME_ONLY and not (voices is not None and voices.learning()):
+        print(f"(doesn't start with its name, ignoring: {text})")
+        return
     if not woke and set(normalize(text).split()) <= config.FILLER_SOUNDS:
         # A throat clear, a cough or a sigh, which speech-to-text writes as "Hmm." or "Uh.": not something to answer.
         print(f"(heard only a filler sound, ignoring: {text})")
+        return
+    if not woke and not _known_voice(started_at, ended_at, heard_at):
+        print(f"(not a voice it knows, ignoring: {text})")
         return
     print(f"{config.HUMAN_NAME}: {text}")
     eyes.last_heard = text
@@ -2293,6 +2347,7 @@ async def main() -> None:
         head_task = asyncio.create_task(head_loop())
         watch_task = asyncio.create_task(watch_loop())
         hearing_task = asyncio.create_task(hearing_loop())
+        volume_task = asyncio.create_task(volume_loop())
         touch_task = asyncio.create_task(touch_loop())
         idle_task = asyncio.create_task(body.idle_loop())  # small head moves while he waits for you
         if config.LISTEN_ON_START:
@@ -2305,6 +2360,7 @@ async def main() -> None:
             head_task.cancel()
             watch_task.cancel()
             hearing_task.cancel()
+            volume_task.cancel()
             touch_task.cancel()
             idle_task.cancel()
             if ears is not None:
